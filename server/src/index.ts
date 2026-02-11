@@ -31,7 +31,7 @@ const httpServer = createServer(app);
 
 // Middleware
 app.use(helmet({
-  contentSecurityPolicy: config.NODE_ENV === 'production' ? undefined : false,
+  contentSecurityPolicy: false, // Disabled — frontend needs to reach Supabase directly for auth
 }));
 app.use(cors({
   origin: config.NODE_ENV === 'production'

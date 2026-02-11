@@ -3,10 +3,11 @@
  * shown together within each sector (e.g. ETFs: EUR, USD, YEN side by side).
  */
 import React, { useEffect, useState, useCallback, useMemo } from 'react';
-import { View, StyleSheet, ScrollView, RefreshControl } from 'react-native';
+import { View, StyleSheet, ScrollView, RefreshControl, Pressable } from 'react-native';
 import { Text, SegmentedButtons } from 'react-native-paper';
 import InstrumentCard from '../../components/InstrumentCard';
 import { colors, spacing, fontSize, currencyColor } from '../../theme';
+import { getCurrencySymbol } from '../../lib/format';
 import { useStore, InstrumentPrice } from '../../lib/store';
 import { gameSocket } from '../../lib/socket';
 import { CURRENCIES, INSTRUMENTS, SECTION_TITLES, SECTION_ORDER } from '../../lib/instruments';
@@ -14,27 +15,30 @@ import type { Currency } from '../../lib/instruments';
 import * as simApi from '../../lib/simApi';
 
 export default function MarketsScreen() {
-  const { prices, commodityPrices, setPrices, setCommodityPrices, simDate } = useStore();
+  const { prices, commodityPrices, forexPrices, setPrices, setCommodityPrices, setForexPrices, simDate } = useStore();
   const [refreshing, setRefreshing] = useState(false);
   const [viewMode, setViewMode] = useState<'all' | Currency>('all');
+  const [displayCurrency, setDisplayCurrency] = useState<string | null>(null); // null = native prices
 
-  // Fetch prices for all currencies (core + commodities)
+  // Fetch prices for all currencies (core + commodities + forex)
   const fetchPrices = useCallback(async () => {
     try {
       await Promise.all(
         CURRENCIES.map(async (cur) => {
-          const [core, commodities] = await Promise.all([
+          const [core, commodities, forex] = await Promise.all([
             simApi.getInstruments(cur) as Promise<InstrumentPrice[]>,
             simApi.getCommodities(cur) as Promise<InstrumentPrice[]>,
+            simApi.getForex(cur) as Promise<InstrumentPrice[]>,
           ]);
           setPrices(cur, core);
           setCommodityPrices(cur, commodities);
+          setForexPrices(cur, forex);
         })
       );
     } catch (e) {
       console.error('[Markets] Failed to fetch prices:', e);
     }
-  }, [setPrices, setCommodityPrices]);
+  }, [setPrices, setCommodityPrices, setForexPrices]);
 
   // Initial fetch
   useEffect(() => {
@@ -47,10 +51,11 @@ export default function MarketsScreen() {
       if (data.currency) {
         if (data.instruments) setPrices(data.currency, data.instruments);
         if (data.commodities) setCommodityPrices(data.currency, data.commodities);
+        if (data.forex) setForexPrices(data.currency, data.forex);
       }
     });
     return unsub;
-  }, [setPrices, setCommodityPrices]);
+  }, [setPrices, setCommodityPrices, setForexPrices]);
 
   // Auto-refresh polling fallback
   useEffect(() => {
@@ -107,6 +112,30 @@ export default function MarketsScreen() {
         />
       </View>
 
+      {/* "Price in" display currency toggle */}
+      <View style={styles.priceInRow}>
+        <Text style={styles.priceInLabel}>Price in:</Text>
+        <Pressable
+          style={[styles.priceInChip, !displayCurrency && styles.priceInChipActive]}
+          onPress={() => setDisplayCurrency(null)}
+        >
+          <Text style={[styles.priceInChipText, !displayCurrency && styles.priceInChipTextActive]}>
+            Native
+          </Text>
+        </Pressable>
+        {CURRENCIES.map((cur) => (
+          <Pressable
+            key={cur}
+            style={[styles.priceInChip, displayCurrency === cur && styles.priceInChipActive]}
+            onPress={() => setDisplayCurrency(displayCurrency === cur ? null : cur)}
+          >
+            <Text style={[styles.priceInChipText, displayCurrency === cur && styles.priceInChipTextActive]}>
+              {getCurrencySymbol(cur)} {cur}
+            </Text>
+          </Pressable>
+        ))}
+      </View>
+
       {/* Instrument list — grouped by section, currencies within each */}
       <ScrollView
         style={styles.list}
@@ -142,7 +171,12 @@ export default function MarketsScreen() {
                 {SECTION_TITLES[sectionKey] || sectionKey}
               </Text>
               {cards.map((inst) => (
-                <InstrumentCard key={`${inst.id}-${inst.currency}`} instrument={inst} />
+                <InstrumentCard
+                  key={`${inst.id}-${inst.currency}`}
+                  instrument={inst}
+                  displayCurrency={displayCurrency || undefined}
+                  forexRates={displayCurrency ? forexPrices : undefined}
+                />
               ))}
             </View>
           );
@@ -159,7 +193,12 @@ export default function MarketsScreen() {
                 if (found) cards.push(found);
               }
               return cards.map((inst) => (
-                <InstrumentCard key={`${inst.id}-${inst.currency}`} instrument={inst} />
+                <InstrumentCard
+                  key={`${inst.id}-${inst.currency}`}
+                  instrument={inst}
+                  displayCurrency={displayCurrency || undefined}
+                  forexRates={displayCurrency ? forexPrices : undefined}
+                />
               ));
             })}
           </View>
@@ -203,6 +242,40 @@ const styles = StyleSheet.create({
   },
   segmented: {
     backgroundColor: colors.surface,
+  },
+  priceInRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: spacing.lg,
+    paddingBottom: spacing.md,
+    gap: spacing.xs,
+    flexWrap: 'wrap',
+  },
+  priceInLabel: {
+    fontSize: fontSize.sm,
+    color: colors.textDim,
+    fontWeight: '600',
+    marginRight: spacing.xs,
+  },
+  priceInChip: {
+    paddingHorizontal: spacing.sm,
+    paddingVertical: 4,
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: colors.border,
+    backgroundColor: colors.surface,
+  },
+  priceInChipActive: {
+    borderColor: colors.primary,
+    backgroundColor: colors.primaryDim,
+  },
+  priceInChipText: {
+    fontSize: fontSize.xs,
+    fontWeight: '600',
+    color: colors.textDim,
+  },
+  priceInChipTextActive: {
+    color: '#fff',
   },
   list: {
     flex: 1,

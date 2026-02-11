@@ -12,7 +12,6 @@ export default function RegisterScreen() {
   const [email, setEmail] = useState('');
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
-  const [confirmPassword, setConfirmPassword] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [usernameStatus, setUsernameStatus] = useState<'idle' | 'checking' | 'available' | 'taken'>('idle');
@@ -47,7 +46,7 @@ export default function RegisterScreen() {
 
   async function handleRegister() {
     // Validation
-    if (!email.trim() || !username.trim() || !password || !confirmPassword) {
+    if (!email.trim() || !username.trim() || !password) {
       setError('Please fill in all fields');
       return;
     }
@@ -61,10 +60,6 @@ export default function RegisterScreen() {
     }
     if (password.length < 6) {
       setError('Password must be at least 6 characters');
-      return;
-    }
-    if (password !== confirmPassword) {
-      setError('Passwords do not match');
       return;
     }
     if (usernameStatus === 'taken') {
@@ -209,19 +204,6 @@ export default function RegisterScreen() {
                 color={colors.textDim}
               />
             }
-          />
-
-          <TextInput
-            label="Confirm Password"
-            value={confirmPassword}
-            onChangeText={setConfirmPassword}
-            mode="outlined"
-            secureTextEntry={!showPassword}
-            outlineColor={colors.border}
-            activeOutlineColor={colors.primary}
-            textColor={colors.text}
-            style={styles.input}
-            theme={{ colors: { onSurfaceVariant: colors.textDim } }}
           />
 
           {error ? (

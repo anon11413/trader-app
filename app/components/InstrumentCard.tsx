@@ -14,14 +14,38 @@ import type { InstrumentPrice } from '../lib/store';
 
 interface InstrumentCardProps {
   instrument: InstrumentPrice;
+  /** If set, show price converted to this currency using forexRates */
+  displayCurrency?: string;
+  /** Forex rates keyed by base currency, needed when displayCurrency is set */
+  forexRates?: Record<string, InstrumentPrice[]>;
 }
 
-export default function InstrumentCard({ instrument }: InstrumentCardProps) {
+/** Convert a price from one currency to another using forex rates in the store */
+function convertPrice(
+  price: number,
+  fromCurrency: string,
+  toCurrency: string,
+  forexRates: Record<string, InstrumentPrice[]>,
+): number {
+  if (fromCurrency === toCurrency) return price;
+  const rates = forexRates[fromCurrency] || [];
+  const rateInst = rates.find(f => f.id === `FOREX_${toCurrency}`);
+  if (!rateInst) return price; // fallback — no rate available
+  return price * rateInst.price;
+}
+
+export default function InstrumentCard({ instrument, displayCurrency, forexRates }: InstrumentCardProps) {
   const router = useRouter();
   const isPositive = instrument.changePercent >= 0;
   const changeColor = isPositive ? colors.success : colors.error;
   const displayName = getInstrumentDisplayName(instrument.id, instrument.currency);
   const curColor = currencyColor(instrument.currency);
+
+  // Determine the price and currency to display
+  const showCurrency = displayCurrency || instrument.currency;
+  const showPrice = (displayCurrency && forexRates)
+    ? convertPrice(instrument.price, instrument.currency, displayCurrency, forexRates)
+    : instrument.price;
 
   return (
     <Pressable
@@ -60,7 +84,7 @@ export default function InstrumentCard({ instrument }: InstrumentCardProps) {
       {/* Right: price + change */}
       <View style={styles.priceSection}>
         <Text style={styles.price}>
-          {formatPrice(instrument.price, instrument.currency)}
+          {formatPrice(showPrice, showCurrency)}
         </Text>
         <View style={[styles.changeBadge, { backgroundColor: isPositive ? '#1b5e2015' : '#b7171715' }]}>
           <Text style={[styles.changeText, { color: changeColor }]}>
