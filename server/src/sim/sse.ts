@@ -3,11 +3,12 @@
  * /api/events endpoint. On each 'period' event (new sim day),
  * clears the price cache and notifies the server to broadcast updates.
  */
-import EventSource from 'eventsource';
+// eslint-disable-next-line @typescript-eslint/no-var-requires
+const EventSource = require('eventsource');
 import { config } from '../config/env';
 import { clearCache } from './api';
 
-let eventSource: EventSource | null = null;
+let eventSource: any = null;
 let reconnectDelay = 1000;
 let onSimUpdate: ((date: string) => void) | null = null;
 
@@ -22,12 +23,12 @@ export function connectToSimSSE() {
   const es = new EventSource(url);
   eventSource = es;
 
-  (es as any).addEventListener('connected', () => {
+  es.addEventListener('connected', () => {
     console.log('[SSE] Connected to simulation');
     reconnectDelay = 1000; // reset backoff
   });
 
-  (es as any).addEventListener('period', (event: any) => {
+  es.addEventListener('period', (event: any) => {
     try {
       const data = JSON.parse(event.data);
       const simDate = data.date || data.simDate;

@@ -55,13 +55,16 @@ async function refreshLeaderboards(): Promise<void> {
 async function cleanupOldSnapshots(): Promise<void> {
   try {
     const cutoff = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString();
-    const { count } = await supabaseAdmin
+    const { error } = await supabaseAdmin
       .from('price_snapshots')
       .delete()
-      .lt('recorded_at', cutoff)
-      .select('id', { count: 'exact', head: true });
+      .lt('recorded_at', cutoff);
 
-    console.log(`[Cron] Cleaned up ${count ?? 0} old price snapshots`);
+    if (error) {
+      console.error('[Cron] Cleanup error:', error.message);
+    } else {
+      console.log('[Cron] Cleaned up old price snapshots');
+    }
   } catch (e) {
     console.error('[Cron] Cleanup failed:', e);
   }
