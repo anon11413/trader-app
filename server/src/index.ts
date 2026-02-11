@@ -326,7 +326,8 @@ app.get('/api/sim/timeseries/:currency/:category', async (req, res) => {
 
 // ── SPA fallback ─────────────────────────────────────────────────
 // Any non-API route serves the Expo web index.html (SPA routing)
-app.get('*', (_req, res) => {
+// Express 5 requires named wildcard parameters
+app.get('{*path}', (_req, res) => {
   res.sendFile(path.join(publicPath, 'index.html'));
 });
 
