@@ -19,14 +19,15 @@ export function connectToSimSSE() {
   const url = `${config.SIM_API_URL}/api/events`;
   console.log(`[SSE] Connecting to simulation: ${url}`);
 
-  eventSource = new EventSource(url);
+  const es = new EventSource(url);
+  eventSource = es;
 
-  eventSource.addEventListener('connected', () => {
+  (es as any).addEventListener('connected', () => {
     console.log('[SSE] Connected to simulation');
     reconnectDelay = 1000; // reset backoff
   });
 
-  eventSource.addEventListener('period', (event: MessageEvent) => {
+  (es as any).addEventListener('period', (event: any) => {
     try {
       const data = JSON.parse(event.data);
       const simDate = data.date || data.simDate;
@@ -41,7 +42,7 @@ export function connectToSimSSE() {
     }
   });
 
-  eventSource.onerror = () => {
+  es.onerror = () => {
     console.warn(`[SSE] Connection error, reconnecting in ${reconnectDelay}ms...`);
     if (eventSource) {
       eventSource.close();
