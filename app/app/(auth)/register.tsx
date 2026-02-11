@@ -4,9 +4,10 @@
 import { useState, useEffect, useCallback } from 'react';
 import { View, StyleSheet, KeyboardAvoidingView, Platform, ScrollView } from 'react-native';
 import { Text, TextInput, Button, HelperText } from 'react-native-paper';
-import { Link } from 'expo-router';
+import { Link, useRouter } from 'expo-router';
 import { colors, spacing, fontSize } from '../../theme';
 import { getSupabaseClient, setRememberMe } from '../../lib/supabase';
+import { useStore } from '../../lib/store';
 
 export default function RegisterScreen() {
   const [email, setEmail] = useState('');
@@ -17,6 +18,24 @@ export default function RegisterScreen() {
   const [success, setSuccess] = useState<'auto' | 'confirm_email' | null>(null);
   const [usernameStatus, setUsernameStatus] = useState<'idle' | 'checking' | 'available' | 'taken'>('idle');
   const [showPassword, setShowPassword] = useState(false);
+  const router = useRouter();
+  const isAuthenticated = useStore(s => s.isAuthenticated);
+
+  // When auth succeeds after registration, navigate to main app
+  useEffect(() => {
+    if (success === 'auto' && isAuthenticated) {
+      router.replace('/(tabs)');
+    }
+  }, [success, isAuthenticated]);
+
+  // Fallback: if 'auto' success but auth doesn't fire within 4s, navigate anyway
+  useEffect(() => {
+    if (success !== 'auto') return;
+    const timer = setTimeout(() => {
+      router.replace('/(tabs)');
+    }, 4000);
+    return () => clearTimeout(timer);
+  }, [success]);
 
   // Debounced username availability check
   useEffect(() => {

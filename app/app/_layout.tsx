@@ -4,7 +4,7 @@
  * Auth state only used for authenticated features (trading, accounts).
  */
 import { useEffect, useState } from 'react';
-import { Stack } from 'expo-router';
+import { Stack, useRouter, useSegments } from 'expo-router';
 import { PaperProvider, MD3DarkTheme } from 'react-native-paper';
 import { StatusBar } from 'expo-status-bar';
 import { View, ActivityIndicator, StyleSheet } from 'react-native';
@@ -29,35 +29,63 @@ const theme = {
 };
 
 export default function RootLayout() {
-  const { setAuth, clearAuth } = useStore();
+  const { setAuth, clearAuth, isAuthenticated } = useStore();
   const [initializing, setInitializing] = useState(true);
+  const router = useRouter();
+  const segments = useSegments();
+
+  // Navigate away from auth screens when authenticated
+  useEffect(() => {
+    if (initializing) return;
+    const inAuthGroup = segments[0] === '(auth)';
+    if (isAuthenticated && inAuthGroup) {
+      // User just signed in — navigate to the main tabs
+      router.replace('/(tabs)');
+    }
+  }, [isAuthenticated, segments, initializing]);
 
   useEffect(() => {
     // Always connect socket for public price feed (no auth needed)
     gameSocket.connect();
+
+    /** Helper to fetch player and set auth with retry.
+     *  After registration the player row may not be queryable yet,
+     *  so we retry a couple of times with a small delay. */
+    async function fetchPlayerAndSetAuth(
+      sb: Awaited<ReturnType<typeof getSupabaseClient>>,
+      userId: string,
+      retries = 3,
+      delay = 600,
+    ): Promise<boolean> {
+      for (let attempt = 0; attempt < retries; attempt++) {
+        const { data: player } = await sb
+          .from('players')
+          .select('username, display_name')
+          .eq('id', userId)
+          .single();
+
+        if (player) {
+          setAuth(userId, player.username, player.display_name);
+          gameSocket.authenticate();
+          const token = await getAccessToken();
+          if (token) bootstrapAccounts(token).catch(() => {});
+          return true;
+        }
+        // Wait before retrying (row may not be committed yet)
+        if (attempt < retries - 1) {
+          await new Promise(r => setTimeout(r, delay));
+        }
+      }
+      return false;
+    }
 
     async function checkSession() {
       try {
         const sb = await getSupabaseClient();
         const { data: { session } } = await sb.auth.getSession();
         if (session?.user) {
-          // Fetch player info
-          const { data: player } = await sb
-            .from('players')
-            .select('username, display_name')
-            .eq('id', session.user.id)
-            .single();
-
-          if (player) {
-            setAuth(session.user.id, player.username, player.display_name);
-            // Authenticate socket for trading
-            gameSocket.authenticate();
-            // Bootstrap accounts
-            const token = await getAccessToken();
-            if (token) bootstrapAccounts(token).catch(() => {});
-          } else {
-            clearAuth();
-          }
+          const found = await fetchPlayerAndSetAuth(sb, session.user.id);
+          if (!found) clearAuth();
         } else {
           clearAuth();
         }
@@ -75,18 +103,11 @@ export default function RootLayout() {
     getSupabaseClient().then((sb) => {
       const { data: { subscription: sub } } = sb.auth.onAuthStateChange(async (event, session) => {
         if (event === 'SIGNED_IN' && session?.user) {
-          const { data: player } = await sb
-            .from('players')
-            .select('username, display_name')
-            .eq('id', session.user.id)
-            .single();
-
-          if (player) {
-            setAuth(session.user.id, player.username, player.display_name);
-            // Authenticate socket for trading
-            gameSocket.authenticate();
-            const token = await getAccessToken();
-            if (token) bootstrapAccounts(token).catch(() => {});
+          const found = await fetchPlayerAndSetAuth(sb, session.user.id);
+          if (!found) {
+            console.warn('[Auth] Player record not found after sign-in');
+            // Still set basic auth so the user isn't stuck
+            setAuth(session.user.id, session.user.email || 'Player', null);
           }
         } else if (event === 'SIGNED_OUT') {
           clearAuth();
