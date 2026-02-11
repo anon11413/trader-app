@@ -1,15 +1,15 @@
 /**
- * Markets tab — shows core instruments + commodities organized by section.
- * Sections: ETFs & Index, Credit & Banking, Market Prices, Commodities.
+ * Markets tab — shows instruments grouped by sector, with all currencies
+ * shown together within each sector (e.g. ETFs: EUR, USD, YEN side by side).
  */
-import React, { useEffect, useState, useCallback } from 'react';
+import React, { useEffect, useState, useCallback, useMemo } from 'react';
 import { View, StyleSheet, ScrollView, RefreshControl } from 'react-native';
 import { Text, SegmentedButtons } from 'react-native-paper';
 import InstrumentCard from '../../components/InstrumentCard';
 import { colors, spacing, fontSize, currencyColor } from '../../theme';
 import { useStore, InstrumentPrice } from '../../lib/store';
 import { gameSocket } from '../../lib/socket';
-import { CURRENCIES, SECTION_TITLES, SECTION_ORDER, getInstrumentsBySection } from '../../lib/instruments';
+import { CURRENCIES, INSTRUMENTS, SECTION_TITLES, SECTION_ORDER } from '../../lib/instruments';
 import type { Currency } from '../../lib/instruments';
 import * as simApi from '../../lib/simApi';
 
@@ -64,8 +64,18 @@ export default function MarketsScreen() {
     setRefreshing(false);
   }, [fetchPrices]);
 
-  // Filter currencies to display
-  const currenciesToShow = viewMode === 'all' ? [...CURRENCIES] : [viewMode];
+  const currenciesToShow: readonly string[] = viewMode === 'all' ? CURRENCIES : [viewMode];
+
+  // Collect all unique commodity IDs across all currencies
+  const allCommodityIds = useMemo(() => {
+    const ids = new Set<string>();
+    for (const cur of currenciesToShow) {
+      for (const c of (commodityPrices[cur] || [])) {
+        ids.add(c.id);
+      }
+    }
+    return Array.from(ids).sort();
+  }, [commodityPrices, currenciesToShow]);
 
   return (
     <View style={styles.container}>
@@ -97,7 +107,7 @@ export default function MarketsScreen() {
         />
       </View>
 
-      {/* Instrument list */}
+      {/* Instrument list — grouped by section, currencies within each */}
       <ScrollView
         style={styles.list}
         contentContainerStyle={styles.listContent}
@@ -109,56 +119,51 @@ export default function MarketsScreen() {
           />
         }
       >
-        {currenciesToShow.map((currency) => {
-          const instruments = prices[currency] || [];
-          const commodities = commodityPrices[currency] || [];
-          if (instruments.length === 0 && commodities.length === 0) return null;
+        {/* Core instrument sections (ETFs, Credit Bank, Market Prices) */}
+        {SECTION_ORDER.filter(s => s !== 'commodities').map((sectionKey) => {
+          // Get the instrument IDs that belong to this section
+          const sectionInstrumentDefs = INSTRUMENTS.filter(i => i.section === sectionKey);
+          if (sectionInstrumentDefs.length === 0) return null;
 
-          // Group core instruments by section
-          const sectionDefs = getInstrumentsBySection(currency as Currency);
+          // Collect all cards: for each instrument in the section, show all currencies
+          const cards: InstrumentPrice[] = [];
+          for (const def of sectionInstrumentDefs) {
+            for (const cur of currenciesToShow) {
+              const found = (prices[cur] || []).find(i => i.id === def.id);
+              if (found) cards.push(found);
+            }
+          }
+
+          if (cards.length === 0) return null;
 
           return (
-            <View key={currency} style={styles.currencyBlock}>
-              {/* Currency header */}
-              <View style={styles.currencyHeader}>
-                <View style={[styles.currencyDot, { backgroundColor: currencyColor(currency) }]} />
-                <Text style={[styles.currencyTitle, { color: currencyColor(currency) }]}>
-                  {currency} Economy
-                </Text>
-              </View>
-
-              {/* Core instrument sections */}
-              {SECTION_ORDER.filter(s => s !== 'commodities').map((sectionKey) => {
-                const sectionInstruments = (sectionDefs[sectionKey] || [])
-                  .map((def) => instruments.find((i) => i.id === def.id))
-                  .filter(Boolean) as InstrumentPrice[];
-
-                if (sectionInstruments.length === 0) return null;
-
-                return (
-                  <View key={sectionKey} style={styles.section}>
-                    <Text style={styles.sectionTitle}>
-                      {SECTION_TITLES[sectionKey] || sectionKey}
-                    </Text>
-                    {sectionInstruments.map((inst) => (
-                      <InstrumentCard key={inst.id} instrument={inst} />
-                    ))}
-                  </View>
-                );
-              })}
-
-              {/* Commodities section */}
-              {commodities.length > 0 && (
-                <View style={styles.section}>
-                  <Text style={styles.sectionTitle}>Commodities</Text>
-                  {commodities.map((inst) => (
-                    <InstrumentCard key={inst.id} instrument={inst} />
-                  ))}
-                </View>
-              )}
+            <View key={sectionKey} style={styles.section}>
+              <Text style={styles.sectionTitle}>
+                {SECTION_TITLES[sectionKey] || sectionKey}
+              </Text>
+              {cards.map((inst) => (
+                <InstrumentCard key={`${inst.id}-${inst.currency}`} instrument={inst} />
+              ))}
             </View>
           );
         })}
+
+        {/* Commodities section — group by commodity name, all currencies together */}
+        {allCommodityIds.length > 0 && (
+          <View style={styles.section}>
+            <Text style={styles.sectionTitle}>Commodities</Text>
+            {allCommodityIds.map((commodityId) => {
+              const cards: InstrumentPrice[] = [];
+              for (const cur of currenciesToShow) {
+                const found = (commodityPrices[cur] || []).find(i => i.id === commodityId);
+                if (found) cards.push(found);
+              }
+              return cards.map((inst) => (
+                <InstrumentCard key={`${inst.id}-${inst.currency}`} instrument={inst} />
+              ));
+            })}
+          </View>
+        )}
 
         {Object.keys(prices).length === 0 && (
           <View style={styles.emptyState}>
@@ -206,29 +211,8 @@ const styles = StyleSheet.create({
     paddingHorizontal: spacing.md,
     paddingBottom: spacing.xl,
   },
-  currencyBlock: {
-    marginBottom: spacing.lg,
-  },
-  currencyHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingHorizontal: spacing.sm,
-    paddingVertical: spacing.sm,
-    marginBottom: spacing.xs,
-  },
-  currencyDot: {
-    width: 10,
-    height: 10,
-    borderRadius: 5,
-    marginRight: spacing.sm,
-  },
-  currencyTitle: {
-    fontSize: fontSize.lg,
-    fontWeight: '700',
-    letterSpacing: 0.5,
-  },
   section: {
-    marginBottom: spacing.md,
+    marginBottom: spacing.lg,
   },
   sectionTitle: {
     fontSize: fontSize.sm,
@@ -238,6 +222,7 @@ const styles = StyleSheet.create({
     paddingVertical: spacing.xs,
     letterSpacing: 1,
     textTransform: 'uppercase',
+    marginBottom: spacing.xs,
   },
   emptyState: {
     padding: spacing.xl,

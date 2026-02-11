@@ -7,22 +7,10 @@ import { View, StyleSheet, Pressable } from 'react-native';
 import { Text } from 'react-native-paper';
 import { useRouter } from 'expo-router';
 import MiniChart from './MiniChart';
-import { colors, spacing, fontSize } from '../theme';
+import { colors, spacing, fontSize, currencyColor } from '../theme';
 import { formatPrice, formatChange } from '../lib/format';
 import { getInstrumentDisplayName } from '../lib/instruments';
 import type { InstrumentPrice } from '../lib/store';
-
-/** Section badge abbreviation and color */
-function getSectionBadge(section: string): { label: string; color: string } {
-  switch (section) {
-    case 'etfs':        return { label: 'ETF', color: colors.primary };
-    case 'credit_bank': return { label: 'BANK', color: '#6dd5ed' };
-    case 'market_prices': return { label: 'MKT', color: '#f5af19' };
-    case 'commodities': return { label: 'CMDTY', color: '#a8e063' };
-    case 'forex':       return { label: 'FX', color: '#ee9ca7' };
-    default:            return { label: section.toUpperCase().slice(0, 4), color: colors.textDim };
-  }
-}
 
 interface InstrumentCardProps {
   instrument: InstrumentPrice;
@@ -33,7 +21,7 @@ export default function InstrumentCard({ instrument }: InstrumentCardProps) {
   const isPositive = instrument.changePercent >= 0;
   const changeColor = isPositive ? colors.success : colors.error;
   const displayName = getInstrumentDisplayName(instrument.id, instrument.currency);
-  const badge = getSectionBadge(instrument.section);
+  const curColor = currencyColor(instrument.currency);
 
   return (
     <Pressable
@@ -45,14 +33,18 @@ export default function InstrumentCard({ instrument }: InstrumentCardProps) {
         router.push(`/instrument/${instrument.id}?currency=${instrument.currency}`)
       }
     >
-      {/* Left: name */}
+      {/* Left: currency tag + name */}
       <View style={styles.nameSection}>
-        <Text style={styles.name} numberOfLines={1}>
-          {displayName}
-        </Text>
-        <Text style={[styles.sectionBadge, { color: badge.color }]}>
-          {badge.label}
-        </Text>
+        <View style={styles.nameRow}>
+          <View style={[styles.currencyTag, { backgroundColor: curColor + '20', borderColor: curColor + '40' }]}>
+            <Text style={[styles.currencyTagText, { color: curColor }]}>
+              {instrument.currency}
+            </Text>
+          </View>
+          <Text style={styles.name} numberOfLines={1}>
+            {displayName}
+          </Text>
+        </View>
       </View>
 
       {/* Center: sparkline */}
@@ -98,16 +90,27 @@ const styles = StyleSheet.create({
     flex: 1,
     minWidth: 100,
   },
+  nameRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.sm,
+  },
+  currencyTag: {
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    borderRadius: 4,
+    borderWidth: 1,
+  },
+  currencyTagText: {
+    fontSize: fontSize.xs,
+    fontWeight: '700',
+    letterSpacing: 0.5,
+  },
   name: {
     fontSize: fontSize.md,
     fontWeight: '600',
     color: colors.text,
-  },
-  sectionBadge: {
-    fontSize: fontSize.xs,
-    marginTop: 2,
-    letterSpacing: 1,
-    fontWeight: '700',
+    flexShrink: 1,
   },
   chartSection: {
     paddingHorizontal: spacing.sm,
