@@ -14,6 +14,7 @@ export default function RegisterScreen() {
   const [password, setPassword] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
+  const [success, setSuccess] = useState<'auto' | 'confirm_email' | null>(null);
   const [usernameStatus, setUsernameStatus] = useState<'idle' | 'checking' | 'available' | 'taken'>('idle');
   const [showPassword, setShowPassword] = useState(false);
 
@@ -68,6 +69,7 @@ export default function RegisterScreen() {
     }
 
     setError('');
+    setSuccess(null);
     setLoading(true);
 
     try {
@@ -79,7 +81,12 @@ export default function RegisterScreen() {
       });
 
       if (authError) {
-        setError(authError.message);
+        // Handle rate limiting
+        if (authError.status === 429) {
+          setError('Too many attempts — please wait a minute and try again');
+        } else {
+          setError(authError.message);
+        }
         return;
       }
 
@@ -96,11 +103,16 @@ export default function RegisterScreen() {
       });
 
       if (regError) {
-        setError(regError.message);
-        return;
+        // 409 means player was already registered (retry scenario) — that's OK
+        if (regError.code === '23505' || regError.message?.includes('already')) {
+          console.log('[Register] Player already registered (retry), continuing...');
+        } else {
+          setError(regError.message);
+          return;
+        }
       }
 
-      if (regResult && !regResult.success) {
+      if (regResult && !regResult.success && regResult.error && !regResult.error.includes('already')) {
         setError(regResult.error || 'Registration failed');
         return;
       }
@@ -108,7 +120,14 @@ export default function RegisterScreen() {
       // Remember by default for new accounts
       setRememberMe(true);
 
-      // Auth state change will handle the rest (in _layout.tsx)
+      // Check if email confirmation is required:
+      // If signUp returns a user but no session, email confirmation is pending
+      if (authData.user && !authData.session) {
+        setSuccess('confirm_email');
+      } else {
+        setSuccess('auto');
+        // Auth state change will handle the rest (in _layout.tsx)
+      }
     } catch (e: any) {
       setError(e.message || 'Registration failed');
     } finally {
@@ -130,6 +149,31 @@ export default function RegisterScreen() {
           <Text style={styles.subtitle}>Start trading with €100</Text>
         </View>
 
+        {/* Success: email confirmation required */}
+        {success === 'confirm_email' && (
+          <View style={styles.successBox}>
+            <Text style={styles.successTitle}>Account Created!</Text>
+            <Text style={styles.successText}>
+              Check your email ({email}) and click the confirmation link, then sign in.
+            </Text>
+            <Link href="/(auth)/login" style={styles.successLink}>
+              <Text style={styles.linkHighlight}>Go to Sign In</Text>
+            </Link>
+          </View>
+        )}
+
+        {/* Success: auto-logged in (no email confirmation) */}
+        {success === 'auto' && (
+          <View style={styles.successBox}>
+            <Text style={styles.successTitle}>Account Created!</Text>
+            <Text style={styles.successText}>
+              Welcome aboard! Logging you in...
+            </Text>
+          </View>
+        )}
+
+        {/* Registration form (hidden after success) */}
+        {!success && (
         <View style={styles.form}>
           <TextInput
             label="Email"
@@ -232,6 +276,7 @@ export default function RegisterScreen() {
             </Link>
           </View>
         </View>
+        )}
       </ScrollView>
     </KeyboardAvoidingView>
   );
@@ -260,6 +305,32 @@ const styles = StyleSheet.create({
     fontSize: fontSize.lg,
     color: colors.primary,
     marginTop: spacing.xs,
+  },
+  successBox: {
+    maxWidth: 400,
+    width: '100%',
+    alignSelf: 'center',
+    backgroundColor: colors.surface,
+    borderRadius: 12,
+    padding: spacing.lg,
+    borderWidth: 1,
+    borderColor: colors.success + '40',
+    alignItems: 'center',
+    gap: spacing.md,
+  },
+  successTitle: {
+    fontSize: fontSize.xl,
+    fontWeight: '700',
+    color: colors.success,
+  },
+  successText: {
+    fontSize: fontSize.md,
+    color: colors.textDim,
+    textAlign: 'center',
+    lineHeight: 22,
+  },
+  successLink: {
+    marginTop: spacing.sm,
   },
   form: {
     maxWidth: 400,

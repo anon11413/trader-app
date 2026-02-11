@@ -34,7 +34,17 @@ export default function LoginScreen() {
       });
 
       if (authError) {
-        setError(authError.message);
+        // Provide user-friendly messages for common errors
+        const msg = authError.message?.toLowerCase() || '';
+        if (msg.includes('email not confirmed') || msg.includes('not confirmed')) {
+          setError('Email not confirmed — check your inbox for a confirmation link');
+        } else if (msg.includes('invalid login credentials') || authError.status === 400) {
+          setError('Invalid email or password');
+        } else if (authError.status === 429) {
+          setError('Too many login attempts — please wait a minute');
+        } else {
+          setError(authError.message);
+        }
       }
       // Success is handled by onAuthStateChange in _layout.tsx
     } catch (e: any) {
