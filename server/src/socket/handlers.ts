@@ -1,6 +1,6 @@
 /**
  * Socket.io event handlers — authentication, trading, currency conversion.
- * Follows the same pattern as stock-pool's socket/handlers.ts.
+ * All clients receive price updates (public). Trade events require auth.
  */
 import { Server as SocketIOServer, Socket } from 'socket.io';
 import { supabaseAdmin, createUserClient } from '../db/supabase';
@@ -17,6 +17,9 @@ export function setupSocketHandlers(io: SocketIOServer) {
   io.on('connection', (socket: AuthenticatedSocket) => {
     console.log(`[Socket] Client connected: ${socket.id}`);
 
+    // All clients receive price_update events automatically (io.emit broadcasts to all)
+    // No room join needed — price updates use io.emit() in the SSE handler
+
     // === Authentication ===
     socket.on('authenticate', async (token: string) => {
       try {
@@ -29,8 +32,7 @@ export function setupSocketHandlers(io: SocketIOServer) {
         socket.userId = user.id;
         socket.jwt = token;
 
-        // Join rooms
-        socket.join('market');
+        // Join user-specific room for trade events
         socket.join(`user:${user.id}`);
 
         // Get player info
@@ -75,8 +77,8 @@ export function setupSocketHandlers(io: SocketIOServer) {
 
       if (result.success) {
         socket.emit('trade_success', result);
-        // Broadcast trade feed to all
-        io.to('market').emit('trade_feed', {
+        // Broadcast trade feed to all connected clients
+        io.emit('trade_feed', {
           playerId: socket.userId,
           ...result,
           timestamp: new Date().toISOString(),
@@ -103,7 +105,7 @@ export function setupSocketHandlers(io: SocketIOServer) {
 
       if (result.success) {
         socket.emit('trade_success', result);
-        io.to('market').emit('trade_feed', {
+        io.emit('trade_feed', {
           playerId: socket.userId,
           ...result,
           timestamp: new Date().toISOString(),

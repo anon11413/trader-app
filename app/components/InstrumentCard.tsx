@@ -12,6 +12,18 @@ import { formatPrice, formatChange } from '../lib/format';
 import { getInstrumentDisplayName } from '../lib/instruments';
 import type { InstrumentPrice } from '../lib/store';
 
+/** Section badge abbreviation and color */
+function getSectionBadge(section: string): { label: string; color: string } {
+  switch (section) {
+    case 'etfs':        return { label: 'ETF', color: colors.primary };
+    case 'credit_bank': return { label: 'BANK', color: '#6dd5ed' };
+    case 'market_prices': return { label: 'MKT', color: '#f5af19' };
+    case 'commodities': return { label: 'CMDTY', color: '#a8e063' };
+    case 'forex':       return { label: 'FX', color: '#ee9ca7' };
+    default:            return { label: section.toUpperCase().slice(0, 4), color: colors.textDim };
+  }
+}
+
 interface InstrumentCardProps {
   instrument: InstrumentPrice;
 }
@@ -21,6 +33,7 @@ export default function InstrumentCard({ instrument }: InstrumentCardProps) {
   const isPositive = instrument.changePercent >= 0;
   const changeColor = isPositive ? colors.success : colors.error;
   const displayName = getInstrumentDisplayName(instrument.id, instrument.currency);
+  const badge = getSectionBadge(instrument.section);
 
   return (
     <Pressable
@@ -37,9 +50,8 @@ export default function InstrumentCard({ instrument }: InstrumentCardProps) {
         <Text style={styles.name} numberOfLines={1}>
           {displayName}
         </Text>
-        <Text style={styles.sectionBadge}>
-          {instrument.section === 'market_prices' ? 'MKT' :
-           instrument.section === 'sector_equity' ? 'EQT' : 'ETF'}
+        <Text style={[styles.sectionBadge, { color: badge.color }]}>
+          {badge.label}
         </Text>
       </View>
 
@@ -93,9 +105,9 @@ const styles = StyleSheet.create({
   },
   sectionBadge: {
     fontSize: fontSize.xs,
-    color: colors.textDim,
     marginTop: 2,
     letterSpacing: 1,
+    fontWeight: '700',
   },
   chartSection: {
     paddingHorizontal: spacing.sm,

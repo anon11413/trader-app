@@ -1,9 +1,9 @@
 /**
  * Instrument definitions and price computation.
- * Mirrors the exact formulas from the web dashboard's instruments.js:
- *   PRICE_DIVISOR = 20, ETF_UNITS = 100_000, INDEX_BASE = 1000
+ * Core instruments: Broad Market ETF, Credit Bank 190d MA, Machine Price
+ * Plus dynamic commodity discovery and forex rates.
  */
-import { getOhlcv, getBalanceSheet, OhlcvData, BalanceSheetData } from './api';
+import { getOhlcv, getBalanceSheet, getOhlcvAssets, OhlcvData, BalanceSheetData } from './api';
 
 export const PRICE_DIVISOR = 20;
 export const ETF_UNITS = 100_000;
@@ -12,22 +12,21 @@ export const INDEX_BASE = 1000;
 export const CURRENCIES = ['EUR', 'USD', 'YEN'] as const;
 export type Currency = typeof CURRENCIES[number];
 
+export type InstrumentSection = 'market_prices' | 'credit_bank' | 'etfs' | 'commodities' | 'forex';
+
 export interface InstrumentDef {
   id: string;
   name: string;
-  section: 'market_prices' | 'sector_equity' | 'etfs_index';
+  section: InstrumentSection;
   /** If true, the forex instrument is skipped when from-currency matches */
   skipSameCurrency?: string;
 }
 
+/** Core instruments — ETFs, Credit Bank, Machine Price only */
 export const INSTRUMENT_DEFS: InstrumentDef[] = [
+  { id: 'BROAD_MARKET_ETF', name: 'Broad Market ETF', section: 'etfs' },
+  { id: 'CREDITBANK_MA', name: 'Credit Bank 190d MA', section: 'credit_bank' },
   { id: 'MACHINE', name: 'Machine Price', section: 'market_prices' },
-  { id: 'FOREX_USD', name: 'USD', section: 'market_prices', skipSameCurrency: 'USD' },
-  { id: 'FOREX_YEN', name: 'YEN', section: 'market_prices', skipSameCurrency: 'YEN' },
-  { id: 'HOUSEHOLD_EQUITY', name: 'Household Equity', section: 'sector_equity' },
-  { id: 'CREDITBANK_MA', name: 'Credit Bank 190d MA', section: 'sector_equity' },
-  { id: 'INDUSTRIAL_ETF', name: 'Industrial ETF', section: 'etfs_index' },
-  { id: 'BROAD_MARKET_ETF', name: 'Broad Market ETF', section: 'etfs_index' },
 ];
 
 export interface InstrumentPrice {
@@ -57,15 +56,43 @@ function sparkline(values: number[], n: number = 50): number[] {
   return values.slice(Math.max(0, values.length - n));
 }
 
-/** Compute current price and sparkline for one instrument in one currency */
+/** Build an InstrumentPrice from a price array */
+function buildInstrumentPrice(
+  id: string, name: string, section: InstrumentSection,
+  currency: string, prices: number[]
+): InstrumentPrice | null {
+  if (!prices || prices.length === 0) return null;
+
+  const currentPrice = prices[prices.length - 1] ?? 0;
+  const prevClose = prices.length >= 2 ? (prices[prices.length - 2] ?? currentPrice) : currentPrice;
+  const change = currentPrice - prevClose;
+  const changePercent = prevClose !== 0 ? (change / prevClose) * 100 : 0;
+
+  return {
+    id,
+    name,
+    section,
+    currency,
+    price: currentPrice,
+    previousClose: prevClose,
+    change,
+    changePercent,
+    sparkline: sparkline(prices),
+  };
+}
+
+/** Compute current price and sparkline for one core instrument in one currency */
 export async function getInstrumentPrice(
   instrumentId: string, currency: Currency
 ): Promise<InstrumentPrice | null> {
   const def = INSTRUMENT_DEFS.find(d => d.id === instrumentId);
-  if (!def) return null;
 
-  // Skip forex pair if viewing same currency
-  if (def.skipSameCurrency === currency) return null;
+  // Handle dynamic GOOD_* instruments
+  if (instrumentId.startsWith('GOOD_')) {
+    return getCommodityInstrumentPrice(currency, instrumentId.replace('GOOD_', ''));
+  }
+
+  if (!def) return null;
 
   try {
     let prices: number[];
@@ -75,23 +102,6 @@ export async function getInstrumentPrice(
       case 'MACHINE': {
         const data = await getOhlcv(currency, 'good', 'MACHINE');
         prices = data.close;
-        break;
-      }
-      case 'FOREX_USD': {
-        const data = await getOhlcv(currency, 'currency', 'USD');
-        prices = data.close;
-        name = `USD/${currency}`;
-        break;
-      }
-      case 'FOREX_YEN': {
-        const data = await getOhlcv(currency, 'currency', 'YEN');
-        prices = data.close;
-        name = `YEN/${currency}`;
-        break;
-      }
-      case 'HOUSEHOLD_EQUITY': {
-        const data = await getBalanceSheet(currency, 'Household');
-        prices = data.equity.map(eq => Math.max(0, eq) / PRICE_DIVISOR);
         break;
       }
       case 'CREDITBANK_MA': {
@@ -109,11 +119,6 @@ export async function getInstrumentPrice(
         prices = maSeries;
         break;
       }
-      case 'INDUSTRIAL_ETF': {
-        const data = await getBalanceSheet(currency, 'Factory');
-        prices = data.equity.map(eq => Math.max(0, eq) / ETF_UNITS);
-        break;
-      }
       case 'BROAD_MARKET_ETF': {
         const data = await getBalanceSheet(currency, 'National');
         const base = Math.max(1, data.equity[0] || 1);
@@ -124,34 +129,92 @@ export async function getInstrumentPrice(
         return null;
     }
 
-    if (!prices || prices.length === 0) return null;
-
-    const currentPrice = prices[prices.length - 1] ?? 0;
-    const prevClose = prices.length >= 2 ? (prices[prices.length - 2] ?? currentPrice) : currentPrice;
-    const change = currentPrice - prevClose;
-    const changePercent = prevClose !== 0 ? (change / prevClose) * 100 : 0;
-
-    return {
-      id: instrumentId,
-      name,
-      section: def.section,
-      currency,
-      price: currentPrice,
-      previousClose: prevClose,
-      change,
-      changePercent,
-      sparkline: sparkline(prices),
-    };
+    return buildInstrumentPrice(instrumentId, name, def.section, currency, prices);
   } catch (e) {
     console.warn(`Failed to get price for ${instrumentId}/${currency}:`, e);
     return null;
   }
 }
 
-/** Get all instrument prices for a given currency */
+/** Get all core instrument prices for a given currency (ETF, Credit Bank, Machine) */
 export async function getAllPrices(currency: Currency): Promise<InstrumentPrice[]> {
   const results = await Promise.all(
     INSTRUMENT_DEFS.map(def => getInstrumentPrice(def.id, currency))
+  );
+  return results.filter((r): r is InstrumentPrice => r !== null);
+}
+
+// --- Commodity Discovery ---
+
+/** Goods to exclude from commodities (already in core instruments) */
+const EXCLUDED_GOODS = new Set(['MACHINE']);
+
+/** Prettify a good name: COTTON -> Cotton, REALESTATE -> Real Estate */
+function prettifyGoodName(name: string): string {
+  const special: Record<string, string> = {
+    REALESTATE: 'Real Estate',
+    LABOURHOUR: 'Labour Hour',
+    KILOWATT: 'Kilowatt',
+  };
+  if (special[name]) return special[name];
+  return name.charAt(0) + name.slice(1).toLowerCase();
+}
+
+/** Discover all commodity goods from the simulation for a currency */
+export async function discoverCommodityGoods(currency: Currency): Promise<string[]> {
+  try {
+    const result = await getOhlcvAssets(currency);
+    const assets = result.assets || [];
+    return assets
+      .filter((a: any) => a.assetType === 'good' && !EXCLUDED_GOODS.has(a.assetName))
+      .map((a: any) => a.assetName);
+  } catch (e) {
+    console.warn(`Failed to discover commodities for ${currency}:`, e);
+    return [];
+  }
+}
+
+/** Get price for a single commodity good */
+export async function getCommodityInstrumentPrice(
+  currency: Currency, goodName: string
+): Promise<InstrumentPrice | null> {
+  try {
+    const data = await getOhlcv(currency, 'good', goodName);
+    const id = `GOOD_${goodName}`;
+    const name = prettifyGoodName(goodName);
+    return buildInstrumentPrice(id, name, 'commodities', currency, data.close);
+  } catch (e) {
+    console.warn(`Failed to get commodity price for ${goodName}/${currency}:`, e);
+    return null;
+  }
+}
+
+/** Get all commodity prices for a currency */
+export async function getAllCommodityPrices(currency: Currency): Promise<InstrumentPrice[]> {
+  const goods = await discoverCommodityGoods(currency);
+  const results = await Promise.all(
+    goods.map(good => getCommodityInstrumentPrice(currency, good))
+  );
+  return results.filter((r): r is InstrumentPrice => r !== null);
+}
+
+// --- Forex ---
+
+/** Get forex instrument prices for a currency */
+export async function getForexPrices(currency: Currency): Promise<InstrumentPrice[]> {
+  const forexTargets = CURRENCIES.filter(c => c !== currency);
+  const results = await Promise.all(
+    forexTargets.map(async (target) => {
+      try {
+        const data = await getOhlcv(currency, 'currency', target);
+        const id = `FOREX_${target}`;
+        const name = `${target}/${currency}`;
+        return buildInstrumentPrice(id, name, 'forex', currency, data.close);
+      } catch (e) {
+        console.warn(`Failed to get forex ${target}/${currency}:`, e);
+        return null;
+      }
+    })
   );
   return results.filter((r): r is InstrumentPrice => r !== null);
 }

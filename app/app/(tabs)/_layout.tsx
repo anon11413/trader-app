@@ -1,21 +1,9 @@
 /**
- * Tab navigator — 5 tabs: Dashboard, Markets, Data, Accounts, Leaderboard.
+ * Tab navigator — 6 tabs: Dashboard, Markets, Forex, Data, Accounts, Leaderboard.
  */
 import { Tabs } from 'expo-router';
 import { Platform } from 'react-native';
 import { colors } from '../../theme';
-
-// Using text labels as icons (lightweight — no icon library needed)
-function TabIcon({ name, focused }: { name: string; focused: boolean }) {
-  const icons: Record<string, string> = {
-    Dashboard: '📊',
-    Markets: '📈',
-    Data: '📉',
-    Accounts: '💰',
-    Leaderboard: '🏆',
-  };
-  return null; // icons are set via tabBarIcon in options
-}
 
 export default function TabsLayout() {
   return (
@@ -50,6 +38,13 @@ export default function TabsLayout() {
         options={{
           title: 'Markets',
           tabBarLabel: 'Markets',
+        }}
+      />
+      <Tabs.Screen
+        name="forex"
+        options={{
+          title: 'Forex',
+          tabBarLabel: 'Forex',
         }}
       />
       <Tabs.Screen

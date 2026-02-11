@@ -11,7 +11,11 @@ import path from 'path';
 
 import { config } from './config/env';
 import { supabaseAdmin, createUserClient } from './db/supabase';
-import { getAllPrices, getExchangeRate, getInstrumentPrice, CURRENCIES, Currency } from './sim/instruments';
+import {
+  getAllPrices, getExchangeRate, getInstrumentPrice,
+  getAllCommodityPrices, getForexPrices,
+  CURRENCIES, Currency
+} from './sim/instruments';
 import { getOhlcv, getBalanceSheet, getTimeSeries, getOhlcvAssets, getCurrencies, getSimStatus } from './sim/api';
 import { connectToSimSSE, setSimUpdateHandler } from './sim/sse';
 import { setupSocketHandlers } from './socket/handlers';
@@ -61,10 +65,20 @@ setupSocketHandlers(io);
 setSimUpdateHandler(async (simDate: string) => {
   console.log(`[Server] Sim update: ${simDate}`);
   try {
-    // Broadcast fresh prices to all connected clients
+    // Broadcast fresh prices to ALL connected clients (public — no auth required)
     for (const currency of CURRENCIES) {
-      const prices = await getAllPrices(currency);
-      io.to('market').emit('price_update', { currency, instruments: prices, simDate });
+      const [corePrices, commodityPrices, forexPrices] = await Promise.all([
+        getAllPrices(currency),
+        getAllCommodityPrices(currency),
+        getForexPrices(currency),
+      ]);
+      io.emit('price_update', {
+        currency,
+        instruments: corePrices,
+        commodities: commodityPrices,
+        forex: forexPrices,
+        simDate,
+      });
     }
     // Trigger price snapshot + leaderboard refresh
     await snapshotPrices();
@@ -106,7 +120,7 @@ app.get('/api/config', (_req, res) => {
 
 // --- Instrument prices ---
 
-// GET /api/instruments/:currency — all 7 instrument prices + sparklines
+// GET /api/instruments/:currency — core instrument prices (ETF, Credit Bank, Machine)
 app.get('/api/instruments/:currency', async (req, res) => {
   try {
     const currency = req.params.currency.toUpperCase() as Currency;
@@ -119,6 +133,38 @@ app.get('/api/instruments/:currency', async (req, res) => {
   } catch (e: any) {
     console.error('[API] /instruments error:', e);
     res.status(500).json({ error: 'Failed to fetch instruments' });
+  }
+});
+
+// GET /api/instruments/:currency/commodities — all discovered commodity prices
+app.get('/api/instruments/:currency/commodities', async (req, res) => {
+  try {
+    const currency = req.params.currency.toUpperCase() as Currency;
+    if (!CURRENCIES.includes(currency)) {
+      res.status(400).json({ error: `Invalid currency: ${currency}` });
+      return;
+    }
+    const prices = await getAllCommodityPrices(currency);
+    res.json(prices);
+  } catch (e: any) {
+    console.error('[API] /instruments/commodities error:', e);
+    res.status(500).json({ error: 'Failed to fetch commodity prices' });
+  }
+});
+
+// GET /api/forex/:currency — forex rates for a base currency
+app.get('/api/forex/:currency', async (req, res) => {
+  try {
+    const currency = req.params.currency.toUpperCase() as Currency;
+    if (!CURRENCIES.includes(currency)) {
+      res.status(400).json({ error: `Invalid currency: ${currency}` });
+      return;
+    }
+    const prices = await getForexPrices(currency);
+    res.json(prices);
+  } catch (e: any) {
+    console.error('[API] /forex error:', e);
+    res.status(500).json({ error: 'Failed to fetch forex prices' });
   }
 });
 
@@ -149,35 +195,32 @@ app.get('/api/instrument/:currency/:id/chart', async (req, res) => {
 
     // Route to the appropriate sim API based on instrument type
     let data: any;
-    switch (id) {
-      case 'MACHINE':
-        data = await getOhlcv(currency, 'good', 'MACHINE', from, to);
-        break;
-      case 'FOREX_USD':
-        data = await getOhlcv(currency, 'currency', 'USD', from, to);
-        break;
-      case 'FOREX_YEN':
-        data = await getOhlcv(currency, 'currency', 'YEN', from, to);
-        break;
-      case 'HOUSEHOLD_EQUITY':
-        data = await getBalanceSheet(currency, 'Household', from, to);
-        data = { type: 'balance_sheet', ...data };
-        break;
-      case 'CREDITBANK_MA':
-        data = await getBalanceSheet(currency, 'CreditBank', from, to);
-        data = { type: 'balance_sheet', ...data };
-        break;
-      case 'INDUSTRIAL_ETF':
-        data = await getBalanceSheet(currency, 'Factory', from, to);
-        data = { type: 'balance_sheet', ...data };
-        break;
-      case 'BROAD_MARKET_ETF':
-        data = await getBalanceSheet(currency, 'National', from, to);
-        data = { type: 'balance_sheet', ...data };
-        break;
-      default:
-        res.status(404).json({ error: 'Instrument not found' });
-        return;
+
+    if (id.startsWith('GOOD_')) {
+      // Dynamic commodity — fetch OHLCV for that good
+      const goodName = id.replace('GOOD_', '');
+      data = await getOhlcv(currency, 'good', goodName, from, to);
+    } else if (id.startsWith('FOREX_')) {
+      // Forex pair
+      const target = id.replace('FOREX_', '');
+      data = await getOhlcv(currency, 'currency', target, from, to);
+    } else {
+      switch (id) {
+        case 'MACHINE':
+          data = await getOhlcv(currency, 'good', 'MACHINE', from, to);
+          break;
+        case 'CREDITBANK_MA':
+          data = await getBalanceSheet(currency, 'CreditBank', from, to);
+          data = { type: 'balance_sheet', ...data };
+          break;
+        case 'BROAD_MARKET_ETF':
+          data = await getBalanceSheet(currency, 'National', from, to);
+          data = { type: 'balance_sheet', ...data };
+          break;
+        default:
+          res.status(404).json({ error: 'Instrument not found' });
+          return;
+      }
     }
 
     res.json(data);

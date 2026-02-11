@@ -1,7 +1,8 @@
 /**
  * Dashboard (home tab) — portfolio summary, recent trades, market overview.
+ * Shows Login/SignUp for guests, Logout for authenticated users.
  */
-import React, { useEffect, useCallback } from 'react';
+import React, { useEffect, useCallback, useRef } from 'react';
 import { View, StyleSheet, ScrollView, RefreshControl, Pressable } from 'react-native';
 import { Text, Button } from 'react-native-paper';
 import { useRouter } from 'expo-router';
@@ -17,24 +18,32 @@ import { CURRENCIES } from '../../lib/instruments';
 export default function DashboardScreen() {
   const router = useRouter();
   const {
-    username, portfolio, prices, tradeFeed, simDate,
-    setPortfolio, setPrices, addTradeFeedItem, setSimDate, clearAuth,
+    username, isAuthenticated, portfolio, prices, tradeFeed, simDate,
+    setPortfolio, setPrices, setCommodityPrices, addTradeFeedItem, setSimDate, clearAuth,
   } = useStore();
   const [refreshing, setRefreshing] = React.useState(false);
+  const portfolioDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // Fetch portfolio + prices
   const fetchAll = useCallback(async () => {
     try {
-      const token = await getAccessToken();
-      if (token) {
-        const data = await simApi.getPortfolio(token);
-        setPortfolio(data);
+      // Portfolio (only if authenticated)
+      if (isAuthenticated) {
+        const token = await getAccessToken();
+        if (token) {
+          const data = await simApi.getPortfolio(token);
+          setPortfolio(data);
+        }
       }
       // Fetch prices for all currencies
       await Promise.all(
         CURRENCIES.map(async (cur) => {
-          const data = await simApi.getInstruments(cur) as InstrumentPrice[];
-          setPrices(cur, data);
+          const [core, commodities] = await Promise.all([
+            simApi.getInstruments(cur) as Promise<InstrumentPrice[]>,
+            simApi.getCommodities(cur) as Promise<InstrumentPrice[]>,
+          ]);
+          setPrices(cur, core);
+          setCommodityPrices(cur, commodities);
         })
       );
       // Sim status
@@ -43,7 +52,7 @@ export default function DashboardScreen() {
     } catch (e) {
       console.error('[Dashboard] Fetch error:', e);
     }
-  }, [setPortfolio, setPrices, setSimDate]);
+  }, [isAuthenticated, setPortfolio, setPrices, setCommodityPrices, setSimDate]);
 
   useEffect(() => {
     fetchAll();
@@ -54,13 +63,36 @@ export default function DashboardScreen() {
     const unsubs = [
       gameSocket.on('price_update', (data: any) => {
         if (data.currency && data.instruments) setPrices(data.currency, data.instruments);
+        if (data.currency && data.commodities) setCommodityPrices(data.currency, data.commodities);
         if (data.simDate) setSimDate(data.simDate);
+        // Debounced portfolio refresh on price update (only if authenticated)
+        if (isAuthenticated) {
+          if (portfolioDebounceRef.current) clearTimeout(portfolioDebounceRef.current);
+          portfolioDebounceRef.current = setTimeout(async () => {
+            const token = await getAccessToken();
+            if (token) {
+              const data = await simApi.getPortfolio(token);
+              setPortfolio(data);
+            }
+          }, 5000);
+        }
       }),
       gameSocket.on('trade_feed', (item: any) => addTradeFeedItem(item)),
-      gameSocket.on('trade_success', () => fetchAll()),
+      gameSocket.on('trade_success', () => {
+        if (isAuthenticated) fetchAll();
+      }),
     ];
-    return () => unsubs.forEach(u => u());
-  }, [setPrices, setSimDate, addTradeFeedItem, fetchAll]);
+    return () => {
+      unsubs.forEach(u => u());
+      if (portfolioDebounceRef.current) clearTimeout(portfolioDebounceRef.current);
+    };
+  }, [isAuthenticated, setPrices, setCommodityPrices, setSimDate, addTradeFeedItem, fetchAll, setPortfolio]);
+
+  // Auto-refresh polling fallback
+  useEffect(() => {
+    const interval = setInterval(fetchAll, 15000);
+    return () => clearInterval(interval);
+  }, [fetchAll]);
 
   const onRefresh = useCallback(async () => {
     setRefreshing(true);
@@ -98,17 +130,45 @@ export default function DashboardScreen() {
         {/* Header */}
         <View style={styles.header}>
           <View>
-            <Text style={styles.greeting}>Welcome back,</Text>
-            <Text style={styles.username}>{username || 'Trader'}</Text>
+            <Text style={styles.greeting}>
+              {isAuthenticated ? 'Welcome back,' : 'Welcome to'}
+            </Text>
+            <Text style={styles.username}>
+              {isAuthenticated ? (username || 'Trader') : 'Trader App'}
+            </Text>
           </View>
-          <Button
-            mode="text"
-            onPress={handleLogout}
-            textColor={colors.textDim}
-            compact
-          >
-            Logout
-          </Button>
+          {isAuthenticated ? (
+            <Button
+              mode="text"
+              onPress={handleLogout}
+              textColor={colors.textDim}
+              compact
+            >
+              Logout
+            </Button>
+          ) : (
+            <View style={styles.authButtons}>
+              <Button
+                mode="contained"
+                onPress={() => router.push('/(auth)/login')}
+                buttonColor={colors.primary}
+                textColor="#000"
+                compact
+                style={styles.authButton}
+              >
+                Login
+              </Button>
+              <Button
+                mode="outlined"
+                onPress={() => router.push('/(auth)/register')}
+                textColor={colors.primary}
+                compact
+                style={styles.authButton}
+              >
+                Sign Up
+              </Button>
+            </View>
+          )}
         </View>
 
         {/* Sim date */}
@@ -116,8 +176,8 @@ export default function DashboardScreen() {
           <Text style={styles.simDate}>Simulation: {simDate}</Text>
         )}
 
-        {/* Portfolio total */}
-        {portfolio && (
+        {/* Portfolio total (authenticated only) */}
+        {isAuthenticated && portfolio && (
           <View style={styles.totalCard}>
             <Text style={styles.totalLabel}>Portfolio Value</Text>
             <Text style={styles.totalValue}>
@@ -133,6 +193,25 @@ export default function DashboardScreen() {
                 </View>
               ))}
             </View>
+          </View>
+        )}
+
+        {/* Guest CTA */}
+        {!isAuthenticated && (
+          <View style={styles.guestCard}>
+            <Text style={styles.guestTitle}>Start Trading</Text>
+            <Text style={styles.guestText}>
+              Sign in to create accounts, trade instruments, and compete on the leaderboard.
+            </Text>
+            <Button
+              mode="contained"
+              onPress={() => router.push('/(auth)/register')}
+              buttonColor={colors.primary}
+              textColor="#000"
+              style={{ marginTop: spacing.sm }}
+            >
+              Create Account
+            </Button>
           </View>
         )}
 
@@ -163,8 +242,8 @@ export default function DashboardScreen() {
           </View>
         )}
 
-        {/* Top holdings */}
-        {topHoldings.length > 0 && (
+        {/* Top holdings (authenticated only) */}
+        {isAuthenticated && topHoldings.length > 0 && (
           <View style={styles.section}>
             <Text style={styles.sectionTitle}>Top Holdings</Text>
             {topHoldings.map((h, i) => {
@@ -256,6 +335,13 @@ const styles = StyleSheet.create({
     fontWeight: '700',
     color: colors.text,
   },
+  authButtons: {
+    flexDirection: 'row',
+    gap: spacing.xs,
+  },
+  authButton: {
+    borderColor: colors.border,
+  },
   simDate: {
     fontSize: fontSize.sm,
     color: colors.textMuted,
@@ -298,6 +384,27 @@ const styles = StyleSheet.create({
   chipText: {
     fontSize: fontSize.sm,
     fontWeight: '600',
+  },
+  guestCard: {
+    backgroundColor: colors.surface,
+    borderRadius: 16,
+    padding: spacing.lg,
+    marginBottom: spacing.lg,
+    borderWidth: 1,
+    borderColor: colors.primary + '40',
+    alignItems: 'center',
+  },
+  guestTitle: {
+    fontSize: fontSize.lg,
+    fontWeight: '700',
+    color: colors.text,
+    marginBottom: spacing.xs,
+  },
+  guestText: {
+    fontSize: fontSize.md,
+    color: colors.textDim,
+    textAlign: 'center',
+    lineHeight: 22,
   },
   section: {
     marginBottom: spacing.lg,

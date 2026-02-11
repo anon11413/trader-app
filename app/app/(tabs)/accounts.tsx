@@ -1,9 +1,11 @@
 /**
  * Accounts tab — manage currency accounts, view holdings, convert currency.
+ * Shows auth prompt for guests trying to create accounts.
  */
 import React, { useEffect, useState, useCallback } from 'react';
 import { View, StyleSheet, ScrollView, RefreshControl } from 'react-native';
-import { Text, Button, FAB } from 'react-native-paper';
+import { Text, Button, FAB, Modal, Portal } from 'react-native-paper';
+import { useRouter } from 'expo-router';
 import AccountCard from '../../components/AccountCard';
 import CurrencyConvertModal from '../../components/CurrencyConvertModal';
 import { colors, spacing, fontSize, currencyColor } from '../../theme';
@@ -15,12 +17,15 @@ import * as simApi from '../../lib/simApi';
 import { getAccessToken } from '../../lib/supabase';
 
 export default function AccountsScreen() {
-  const { portfolio, setPortfolio } = useStore();
+  const router = useRouter();
+  const { isAuthenticated, portfolio, setPortfolio } = useStore();
   const [refreshing, setRefreshing] = useState(false);
   const [showConvert, setShowConvert] = useState(false);
+  const [showAuthPrompt, setShowAuthPrompt] = useState(false);
   const [creatingAccount, setCreatingAccount] = useState<string | null>(null);
 
   const fetchPortfolio = useCallback(async () => {
+    if (!isAuthenticated) return;
     try {
       const token = await getAccessToken();
       if (token) {
@@ -30,7 +35,7 @@ export default function AccountsScreen() {
     } catch (e) {
       console.error('[Accounts] Failed to fetch portfolio:', e);
     }
-  }, [setPortfolio]);
+  }, [isAuthenticated, setPortfolio]);
 
   useEffect(() => {
     fetchPortfolio();
@@ -56,7 +61,12 @@ export default function AccountsScreen() {
   const existingCurrencies = accounts.map(a => a.currency);
   const missingCurrencies = CURRENCIES.filter(c => !existingCurrencies.includes(c));
 
-  async function createAccount(currency: string) {
+  function handleCreateAccount(currency: string) {
+    if (!isAuthenticated) {
+      setShowAuthPrompt(true);
+      return;
+    }
+
     setCreatingAccount(currency);
     try {
       gameSocket.send('create_account', { currency });
@@ -72,6 +82,42 @@ export default function AccountsScreen() {
     } catch {
       setCreatingAccount(null);
     }
+  }
+
+  // Guest view
+  if (!isAuthenticated) {
+    return (
+      <View style={styles.container}>
+        <View style={styles.header}>
+          <Text style={styles.title}>Accounts</Text>
+        </View>
+        <View style={styles.guestContainer}>
+          <Text style={styles.guestTitle}>Sign in to Start Trading</Text>
+          <Text style={styles.guestText}>
+            Create an account to receive your starting balance of 100 EUR and begin trading instruments across the economy.
+          </Text>
+          <Button
+            mode="contained"
+            onPress={() => router.push('/(auth)/login')}
+            buttonColor={colors.primary}
+            textColor="#000"
+            style={styles.guestButton}
+            labelStyle={styles.guestButtonLabel}
+          >
+            Login
+          </Button>
+          <Button
+            mode="outlined"
+            onPress={() => router.push('/(auth)/register')}
+            textColor={colors.primary}
+            style={styles.guestButton}
+            labelStyle={styles.guestButtonLabel}
+          >
+            Sign Up
+          </Button>
+        </View>
+      </View>
+    );
   }
 
   return (
@@ -116,7 +162,7 @@ export default function AccountsScreen() {
               <Button
                 key={cur}
                 mode="outlined"
-                onPress={() => createAccount(cur)}
+                onPress={() => handleCreateAccount(cur)}
                 loading={creatingAccount === cur}
                 disabled={creatingAccount !== null}
                 style={styles.createButton}
@@ -153,6 +199,43 @@ export default function AccountsScreen() {
         visible={showConvert}
         onDismiss={() => setShowConvert(false)}
       />
+
+      {/* Auth prompt modal */}
+      <Portal>
+        <Modal
+          visible={showAuthPrompt}
+          onDismiss={() => setShowAuthPrompt(false)}
+          contentContainerStyle={styles.authModal}
+        >
+          <Text style={styles.authModalTitle}>Sign In Required</Text>
+          <Text style={styles.authModalText}>
+            You need to sign in before you can create trading accounts.
+          </Text>
+          <Button
+            mode="contained"
+            onPress={() => {
+              setShowAuthPrompt(false);
+              router.push('/(auth)/login');
+            }}
+            buttonColor={colors.primary}
+            textColor="#000"
+            style={styles.authModalButton}
+          >
+            Login
+          </Button>
+          <Button
+            mode="outlined"
+            onPress={() => {
+              setShowAuthPrompt(false);
+              router.push('/(auth)/register');
+            }}
+            textColor={colors.primary}
+            style={styles.authModalButton}
+          >
+            Sign Up
+          </Button>
+        </Modal>
+      </Portal>
     </View>
   );
 }
@@ -243,5 +326,62 @@ const styles = StyleSheet.create({
     right: spacing.lg,
     bottom: spacing.xl,
     backgroundColor: colors.primary,
+  },
+  // Guest view
+  guestContainer: {
+    flex: 1,
+    justifyContent: 'center',
+    padding: spacing.xl,
+    alignItems: 'center',
+  },
+  guestTitle: {
+    fontSize: fontSize.xxl,
+    fontWeight: '700',
+    color: colors.text,
+    marginBottom: spacing.md,
+    textAlign: 'center',
+  },
+  guestText: {
+    fontSize: fontSize.md,
+    color: colors.textDim,
+    textAlign: 'center',
+    lineHeight: 24,
+    marginBottom: spacing.lg,
+  },
+  guestButton: {
+    width: '100%',
+    maxWidth: 300,
+    marginBottom: spacing.sm,
+    borderColor: colors.border,
+  },
+  guestButtonLabel: {
+    fontSize: fontSize.lg,
+    fontWeight: '600',
+  },
+  // Auth prompt modal
+  authModal: {
+    backgroundColor: colors.surface,
+    padding: spacing.xl,
+    margin: spacing.xl,
+    borderRadius: 16,
+    alignItems: 'center',
+  },
+  authModalTitle: {
+    fontSize: fontSize.lg,
+    fontWeight: '700',
+    color: colors.text,
+    marginBottom: spacing.sm,
+  },
+  authModalText: {
+    fontSize: fontSize.md,
+    color: colors.textDim,
+    textAlign: 'center',
+    marginBottom: spacing.lg,
+    lineHeight: 22,
+  },
+  authModalButton: {
+    width: '100%',
+    marginBottom: spacing.sm,
+    borderColor: colors.border,
   },
 });

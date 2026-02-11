@@ -1,6 +1,6 @@
 /**
  * Zustand global state store.
- * Manages auth, market data, portfolio, leaderboard, and UI state.
+ * Manages auth, market data (core + commodities + forex), portfolio, leaderboard, and UI state.
  */
 import { create } from 'zustand';
 
@@ -72,7 +72,9 @@ interface AppState {
   simDate: string | null;
 
   // Market data — prices keyed by currency
-  prices: Record<string, InstrumentPrice[]>;  // { EUR: [...], USD: [...], YEN: [...] }
+  prices: Record<string, InstrumentPrice[]>;       // Core instruments (ETF, Credit Bank, Machine)
+  commodityPrices: Record<string, InstrumentPrice[]>; // Dynamic commodities
+  forexPrices: Record<string, InstrumentPrice[]>;     // Forex rates
 
   // Portfolio
   portfolio: PortfolioSummary | null;
@@ -95,6 +97,8 @@ interface AppState {
   setLoading: (loading: boolean) => void;
   setSimDate: (date: string) => void;
   setPrices: (currency: string, instruments: InstrumentPrice[]) => void;
+  setCommodityPrices: (currency: string, instruments: InstrumentPrice[]) => void;
+  setForexPrices: (currency: string, instruments: InstrumentPrice[]) => void;
   setPortfolio: (portfolio: PortfolioSummary) => void;
   setSelectedAccount: (accountId: string) => void;
   setLeaderboard: (entries: LeaderboardEntry[], type: string) => void;
@@ -116,6 +120,8 @@ export const useStore = create<AppState>((set, get) => ({
   simDate: null,
 
   prices: {},
+  commodityPrices: {},
+  forexPrices: {},
 
   portfolio: null,
   selectedAccountId: null,
@@ -147,6 +153,16 @@ export const useStore = create<AppState>((set, get) => ({
   setPrices: (currency, instruments) =>
     set((state) => ({
       prices: { ...state.prices, [currency]: instruments },
+    })),
+
+  setCommodityPrices: (currency, instruments) =>
+    set((state) => ({
+      commodityPrices: { ...state.commodityPrices, [currency]: instruments },
+    })),
+
+  setForexPrices: (currency, instruments) =>
+    set((state) => ({
+      forexPrices: { ...state.forexPrices, [currency]: instruments },
     })),
 
   setPortfolio: (portfolio) => {

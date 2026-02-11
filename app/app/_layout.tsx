@@ -1,6 +1,7 @@
 /**
- * Root layout — PaperProvider with dark theme, auth gate,
- * socket connection management.
+ * Root layout — PaperProvider with dark theme.
+ * No auth gate — all users see the app. Socket connects publicly for price feed.
+ * Auth state only used for authenticated features (trading, accounts).
  */
 import { useEffect, useState } from 'react';
 import { Stack } from 'expo-router';
@@ -28,11 +29,13 @@ const theme = {
 };
 
 export default function RootLayout() {
-  const { isAuthenticated, isLoading, setAuth, clearAuth, setLoading } = useStore();
+  const { setAuth, clearAuth } = useStore();
   const [initializing, setInitializing] = useState(true);
 
-  // Check existing session on mount
   useEffect(() => {
+    // Always connect socket for public price feed (no auth needed)
+    gameSocket.connect();
+
     async function checkSession() {
       try {
         const sb = await getSupabaseClient();
@@ -47,8 +50,8 @@ export default function RootLayout() {
 
           if (player) {
             setAuth(session.user.id, player.username, player.display_name);
-            // Connect socket
-            gameSocket.connect();
+            // Authenticate socket for trading
+            gameSocket.authenticate();
             // Bootstrap accounts
             const token = await getAccessToken();
             if (token) bootstrapAccounts(token).catch(() => {});
@@ -78,15 +81,16 @@ export default function RootLayout() {
             .eq('id', session.user.id)
             .single();
 
-        if (player) {
-          setAuth(session.user.id, player.username, player.display_name);
-          gameSocket.connect();
-          const token = await getAccessToken();
-          if (token) bootstrapAccounts(token).catch(() => {});
-        }
+          if (player) {
+            setAuth(session.user.id, player.username, player.display_name);
+            // Authenticate socket for trading
+            gameSocket.authenticate();
+            const token = await getAccessToken();
+            if (token) bootstrapAccounts(token).catch(() => {});
+          }
         } else if (event === 'SIGNED_OUT') {
-          gameSocket.disconnect();
           clearAuth();
+          // Socket stays connected for public price feed, just lose auth
         }
       });
       subscription = sub;
@@ -117,11 +121,9 @@ export default function RootLayout() {
           animation: 'fade',
         }}
       >
-        {isAuthenticated ? (
-          <Stack.Screen name="(tabs)" />
-        ) : (
-          <Stack.Screen name="(auth)" />
-        )}
+        {/* Always show tabs — no auth gate */}
+        <Stack.Screen name="(tabs)" />
+        <Stack.Screen name="(auth)" />
         <Stack.Screen
           name="instrument/[id]"
           options={{

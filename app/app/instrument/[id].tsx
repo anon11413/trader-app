@@ -1,9 +1,10 @@
 /**
  * Instrument detail screen — full chart + trade panel.
  * Navigated from Markets tab via InstrumentCard tap.
+ * Supports core instruments, dynamic GOOD_* commodities, and FOREX_* pairs.
  */
-import React, { useEffect, useState, useMemo } from 'react';
-import { View, StyleSheet, ScrollView, Pressable } from 'react-native';
+import React, { useEffect, useState, useMemo, useRef, useCallback } from 'react';
+import { View, StyleSheet, ScrollView } from 'react-native';
 import { Text, IconButton, SegmentedButtons } from 'react-native-paper';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import FullChart from '../../components/FullChart';
@@ -12,8 +13,9 @@ import { colors, spacing, fontSize, currencyColor } from '../../theme';
 import { formatPrice, formatChange, formatCurrency } from '../../lib/format';
 import { getInstrumentDisplayName, getInstrument } from '../../lib/instruments';
 import { useStore } from '../../lib/store';
+import { gameSocket } from '../../lib/socket';
 import * as simApi from '../../lib/simApi';
-import { PRICE_DIVISOR, ETF_UNITS, INDEX_BASE } from '../../lib/instruments';
+import { PRICE_DIVISOR, INDEX_BASE } from '../../lib/instruments';
 
 interface ChartPoint {
   date: string;
@@ -27,83 +29,110 @@ interface ChartPoint {
 export default function InstrumentDetailScreen() {
   const { id, currency } = useLocalSearchParams<{ id: string; currency: string }>();
   const router = useRouter();
-  const { prices, portfolio } = useStore();
+  const { prices, commodityPrices, forexPrices, portfolio } = useStore();
 
   const [chartData, setChartData] = useState<ChartPoint[]>([]);
   const [chartMode, setChartMode] = useState<'line' | 'candle'>('line');
   const [loading, setLoading] = useState(true);
+  const refreshIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   const def = getInstrument(id || '');
   const displayName = getInstrumentDisplayName(id || '', currency || 'EUR');
 
-  // Get current price from store
+  // Get current price from store — search core, commodities, and forex
   const currentInstrument = useMemo(() => {
     const cur = currency || 'EUR';
-    const instruments = prices[cur] || [];
-    return instruments.find(i => i.id === id);
-  }, [prices, id, currency]);
+    // Core instruments
+    const core = prices[cur] || [];
+    const found = core.find(i => i.id === id);
+    if (found) return found;
+    // Commodities
+    const commodities = commodityPrices[cur] || [];
+    const foundCommodity = commodities.find(i => i.id === id);
+    if (foundCommodity) return foundCommodity;
+    // Forex
+    const forex = forexPrices[cur] || [];
+    const foundForex = forex.find(i => i.id === id);
+    if (foundForex) return foundForex;
+    return undefined;
+  }, [prices, commodityPrices, forexPrices, id, currency]);
 
   // Fetch chart data
-  useEffect(() => {
-    async function fetchChart() {
-      if (!id || !currency) return;
-      setLoading(true);
-      try {
-        const data = await simApi.getInstrumentChart(currency, id);
-        const points: ChartPoint[] = [];
+  const fetchChart = useCallback(async (showLoading = false) => {
+    if (!id || !currency) return;
+    if (showLoading) setLoading(true);
+    try {
+      const data = await simApi.getInstrumentChart(currency, id);
+      const points: ChartPoint[] = [];
 
-        if ((data as any).type === 'balance_sheet') {
-          // Balance sheet data — transform to line chart points
-          const bs = data as any;
-          const dates: string[] = bs.dates || [];
-          const equity: number[] = bs.equity || [];
+      if ((data as any).type === 'balance_sheet') {
+        // Balance sheet data — transform to line chart points
+        const bs = data as any;
+        const dates: string[] = bs.dates || [];
+        const equity: number[] = bs.equity || [];
 
-          for (let i = 0; i < dates.length; i++) {
-            let value = Math.max(0, equity[i] || 0);
-            // Apply transform based on instrument type
-            if (id === 'HOUSEHOLD_EQUITY') {
-              value = value / PRICE_DIVISOR;
-            } else if (id === 'CREDITBANK_MA') {
-              value = value / PRICE_DIVISOR;
-              // Note: MA is computed server-side for live price,
-              // but for chart we show the raw equity/20 series
-            } else if (id === 'INDUSTRIAL_ETF') {
-              value = value / ETF_UNITS;
-            } else if (id === 'BROAD_MARKET_ETF') {
-              const base = Math.max(1, equity[0] || 1);
-              value = (Math.max(0, equity[i] || 0) / base) * INDEX_BASE;
-            }
-            points.push({ date: dates[i], value });
+        for (let i = 0; i < dates.length; i++) {
+          let value = Math.max(0, equity[i] || 0);
+          // Apply transform based on instrument type
+          if (id === 'CREDITBANK_MA') {
+            value = value / PRICE_DIVISOR;
+          } else if (id === 'BROAD_MARKET_ETF') {
+            const base = Math.max(1, equity[0] || 1);
+            value = (Math.max(0, equity[i] || 0) / base) * INDEX_BASE;
           }
-        } else {
-          // OHLCV data
-          const ohlcv = data as any;
-          const dates: string[] = ohlcv.dates || [];
-          for (let i = 0; i < dates.length; i++) {
-            points.push({
-              date: dates[i],
-              value: ohlcv.close?.[i] ?? 0,
-              open: ohlcv.open?.[i],
-              high: ohlcv.high?.[i],
-              low: ohlcv.low?.[i],
-              close: ohlcv.close?.[i],
-            });
-          }
-          // OHLCV instruments can show candlesticks
-          if (def?.isOhlcv) {
-            setChartMode('candle');
-          }
+          points.push({ date: dates[i], value });
         }
-
-        setChartData(points);
-      } catch (e) {
-        console.error('[Chart] Failed to fetch:', e);
-      } finally {
-        setLoading(false);
+      } else {
+        // OHLCV data — core MACHINE, all GOOD_*, and FOREX_* instruments
+        const ohlcv = data as any;
+        const dates: string[] = ohlcv.dates || [];
+        for (let i = 0; i < dates.length; i++) {
+          points.push({
+            date: dates[i],
+            value: ohlcv.close?.[i] ?? 0,
+            open: ohlcv.open?.[i],
+            high: ohlcv.high?.[i],
+            low: ohlcv.low?.[i],
+            close: ohlcv.close?.[i],
+          });
+        }
+        // OHLCV instruments can show candlesticks
+        if (def?.isOhlcv && showLoading) {
+          setChartMode('candle');
+        }
       }
+
+      setChartData(points);
+    } catch (e) {
+      console.error('[Chart] Failed to fetch:', e);
+    } finally {
+      if (showLoading) setLoading(false);
     }
-    fetchChart();
-  }, [id, currency]);
+  }, [id, currency, def]);
+
+  // Initial fetch
+  useEffect(() => {
+    fetchChart(true);
+  }, [fetchChart]);
+
+  // Auto-refresh chart every 30 seconds
+  useEffect(() => {
+    refreshIntervalRef.current = setInterval(() => {
+      fetchChart(false); // silent refresh, no loading spinner
+    }, 30000);
+    return () => {
+      if (refreshIntervalRef.current) clearInterval(refreshIntervalRef.current);
+    };
+  }, [fetchChart]);
+
+  // Listen for socket price updates to trigger a chart refresh
+  useEffect(() => {
+    const unsub = gameSocket.on('price_update', () => {
+      // Prices in store are updated by other listeners;
+      // we just need the chart to refresh periodically (handled by interval above)
+    });
+    return unsub;
+  }, []);
 
   const isPositive = (currentInstrument?.changePercent ?? 0) >= 0;
 

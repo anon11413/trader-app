@@ -1,6 +1,6 @@
 /**
- * Markets tab — shows all instruments organized by currency (EUR/USD/YEN),
- * each currency section showing its instruments grouped by section.
+ * Markets tab — shows core instruments + commodities organized by section.
+ * Sections: ETFs & Index, Credit & Banking, Market Prices, Commodities.
  */
 import React, { useEffect, useState, useCallback } from 'react';
 import { View, StyleSheet, ScrollView, RefreshControl } from 'react-native';
@@ -9,28 +9,32 @@ import InstrumentCard from '../../components/InstrumentCard';
 import { colors, spacing, fontSize, currencyColor } from '../../theme';
 import { useStore, InstrumentPrice } from '../../lib/store';
 import { gameSocket } from '../../lib/socket';
-import { CURRENCIES, SECTION_TITLES, getInstrumentsBySection } from '../../lib/instruments';
+import { CURRENCIES, SECTION_TITLES, SECTION_ORDER, getInstrumentsBySection } from '../../lib/instruments';
 import type { Currency } from '../../lib/instruments';
 import * as simApi from '../../lib/simApi';
 
 export default function MarketsScreen() {
-  const { prices, setPrices, simDate } = useStore();
+  const { prices, commodityPrices, setPrices, setCommodityPrices, simDate } = useStore();
   const [refreshing, setRefreshing] = useState(false);
   const [viewMode, setViewMode] = useState<'all' | Currency>('all');
 
-  // Fetch prices for all currencies
+  // Fetch prices for all currencies (core + commodities)
   const fetchPrices = useCallback(async () => {
     try {
       await Promise.all(
         CURRENCIES.map(async (cur) => {
-          const data = await simApi.getInstruments(cur) as InstrumentPrice[];
-          setPrices(cur, data);
+          const [core, commodities] = await Promise.all([
+            simApi.getInstruments(cur) as Promise<InstrumentPrice[]>,
+            simApi.getCommodities(cur) as Promise<InstrumentPrice[]>,
+          ]);
+          setPrices(cur, core);
+          setCommodityPrices(cur, commodities);
         })
       );
     } catch (e) {
       console.error('[Markets] Failed to fetch prices:', e);
     }
-  }, [setPrices]);
+  }, [setPrices, setCommodityPrices]);
 
   // Initial fetch
   useEffect(() => {
@@ -40,12 +44,19 @@ export default function MarketsScreen() {
   // Listen for live price updates
   useEffect(() => {
     const unsub = gameSocket.on('price_update', (data: any) => {
-      if (data.currency && data.instruments) {
-        setPrices(data.currency, data.instruments);
+      if (data.currency) {
+        if (data.instruments) setPrices(data.currency, data.instruments);
+        if (data.commodities) setCommodityPrices(data.currency, data.commodities);
       }
     });
     return unsub;
-  }, [setPrices]);
+  }, [setPrices, setCommodityPrices]);
+
+  // Auto-refresh polling fallback
+  useEffect(() => {
+    const interval = setInterval(fetchPrices, 15000);
+    return () => clearInterval(interval);
+  }, [fetchPrices]);
 
   const onRefresh = useCallback(async () => {
     setRefreshing(true);
@@ -100,11 +111,11 @@ export default function MarketsScreen() {
       >
         {currenciesToShow.map((currency) => {
           const instruments = prices[currency] || [];
-          if (instruments.length === 0) return null;
+          const commodities = commodityPrices[currency] || [];
+          if (instruments.length === 0 && commodities.length === 0) return null;
 
-          // Group by section
+          // Group core instruments by section
           const sectionDefs = getInstrumentsBySection(currency as Currency);
-          const sectionOrder = ['market_prices', 'sector_equity', 'etfs_index'];
 
           return (
             <View key={currency} style={styles.currencyBlock}>
@@ -116,7 +127,8 @@ export default function MarketsScreen() {
                 </Text>
               </View>
 
-              {sectionOrder.map((sectionKey) => {
+              {/* Core instrument sections */}
+              {SECTION_ORDER.filter(s => s !== 'commodities').map((sectionKey) => {
                 const sectionInstruments = (sectionDefs[sectionKey] || [])
                   .map((def) => instruments.find((i) => i.id === def.id))
                   .filter(Boolean) as InstrumentPrice[];
@@ -134,6 +146,16 @@ export default function MarketsScreen() {
                   </View>
                 );
               })}
+
+              {/* Commodities section */}
+              {commodities.length > 0 && (
+                <View style={styles.section}>
+                  <Text style={styles.sectionTitle}>Commodities</Text>
+                  {commodities.map((inst) => (
+                    <InstrumentCard key={inst.id} instrument={inst} />
+                  ))}
+                </View>
+              )}
             </View>
           );
         })}

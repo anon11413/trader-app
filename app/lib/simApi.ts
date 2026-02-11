@@ -48,10 +48,24 @@ export interface TimeSeriesData {
 // --- API calls ---
 
 /**
- * Get all instrument prices for a currency (used on Markets tab).
+ * Get core instrument prices for a currency (ETF, Credit Bank, Machine).
  */
 export async function getInstruments(currency: string) {
   return apiFetch(`/api/instruments/${currency}`);
+}
+
+/**
+ * Get commodity prices for a currency (dynamic — all discovered goods).
+ */
+export async function getCommodities(currency: string) {
+  return apiFetch(`/api/instruments/${currency}/commodities`);
+}
+
+/**
+ * Get forex prices for a currency.
+ */
+export async function getForex(currency: string) {
+  return apiFetch(`/api/forex/${currency}`);
 }
 
 /**

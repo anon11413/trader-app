@@ -1,6 +1,7 @@
 /**
  * Socket.io client wrapper — real-time connection to the trader server.
- * Handles authentication, reconnection, and event forwarding.
+ * Connects immediately for public price feed (no auth needed).
+ * Authenticate later for trade capabilities.
  */
 import { io, Socket } from 'socket.io-client';
 import { getAccessToken } from './supabase';
@@ -19,21 +20,16 @@ class GameSocket {
   private connecting = false;
   private authRetries = 0;
   private maxRetries = 3;
+  private _isAuthenticated = false;
 
   /**
-   * Connect to server and authenticate with JWT.
+   * Connect to server for public price feed (no auth required).
    */
-  async connect(): Promise<void> {
+  connect(): void {
     if (this.socket?.connected || this.connecting) return;
     this.connecting = true;
 
     try {
-      const token = await getAccessToken();
-      if (!token) {
-        this.connecting = false;
-        return;
-      }
-
       this.socket = io(SERVER_URL, {
         transports: ['websocket', 'polling'],
         reconnection: true,
@@ -44,19 +40,20 @@ class GameSocket {
       });
 
       this.socket.on('connect', () => {
-        console.log('[Socket] Connected');
+        console.log('[Socket] Connected (public)');
         this.authRetries = 0;
-        // Authenticate
-        this.socket!.emit('authenticate', token);
+        this.emit('connected', {});
       });
 
       this.socket.on('authenticated', (data: any) => {
         console.log('[Socket] Authenticated:', data.username);
+        this._isAuthenticated = true;
         this.emit('authenticated', data);
       });
 
       this.socket.on('auth_error', (data: any) => {
         console.warn('[Socket] Auth error:', data.error);
+        this._isAuthenticated = false;
         if (this.authRetries < this.maxRetries) {
           this.authRetries++;
           // Try with refreshed token
@@ -70,21 +67,27 @@ class GameSocket {
         this.emit('auth_error', data);
       });
 
-      // Forward game events
-      const gameEvents = [
+      // Forward game events — all clients receive these
+      const publicEvents = [
         'price_update',
-        'trade_success', 'trade_error', 'trade_feed',
-        'account_created', 'account_error',
-        'convert_success', 'convert_error',
+        'trade_feed',
         'sim_update',
       ];
 
-      for (const event of gameEvents) {
+      // Auth-required events
+      const authEvents = [
+        'trade_success', 'trade_error',
+        'account_created', 'account_error',
+        'convert_success', 'convert_error',
+      ];
+
+      for (const event of [...publicEvents, ...authEvents]) {
         this.socket.on(event, (data: any) => this.emit(event, data));
       }
 
       this.socket.on('disconnect', (reason: string) => {
         console.log('[Socket] Disconnected:', reason);
+        this._isAuthenticated = false;
         this.emit('disconnected', { reason });
       });
 
@@ -98,21 +101,38 @@ class GameSocket {
   }
 
   /**
+   * Authenticate the connection with a JWT token (for trading capabilities).
+   */
+  async authenticate(token?: string): Promise<void> {
+    if (!this.socket?.connected) {
+      this.connect();
+      // Wait a bit for connection
+      await new Promise(resolve => setTimeout(resolve, 500));
+    }
+
+    const authToken = token || await getAccessToken();
+    if (authToken && this.socket?.connected) {
+      this.socket.emit('authenticate', authToken);
+    }
+  }
+
+  /**
    * Disconnect from server.
    */
   disconnect() {
     if (this.socket) {
       this.socket.disconnect();
       this.socket = null;
+      this._isAuthenticated = false;
     }
   }
 
   /**
-   * Reconnect with fresh token (e.g., after app comes to foreground).
+   * Reconnect (e.g., after app comes to foreground).
    */
-  async reconnect(): Promise<void> {
+  reconnect(): void {
     this.disconnect();
-    await this.connect();
+    this.connect();
   }
 
   /**
@@ -153,6 +173,10 @@ class GameSocket {
 
   get isConnected(): boolean {
     return this.socket?.connected ?? false;
+  }
+
+  get isAuthed(): boolean {
+    return this._isAuthenticated;
   }
 }
 
