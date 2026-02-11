@@ -8,11 +8,10 @@ import { PaperProvider, MD3DarkTheme } from 'react-native-paper';
 import { StatusBar } from 'expo-status-bar';
 import { View, ActivityIndicator, StyleSheet } from 'react-native';
 import { colors } from '../theme';
-import { supabase } from '../lib/supabase';
+import { getSupabaseClient, getAccessToken } from '../lib/supabase';
 import { useStore } from '../lib/store';
 import { gameSocket } from '../lib/socket';
 import { bootstrapAccounts } from '../lib/simApi';
-import { getAccessToken } from '../lib/supabase';
 
 const theme = {
   ...MD3DarkTheme,
@@ -36,10 +35,11 @@ export default function RootLayout() {
   useEffect(() => {
     async function checkSession() {
       try {
-        const { data: { session } } = await supabase.auth.getSession();
+        const sb = await getSupabaseClient();
+        const { data: { session } } = await sb.auth.getSession();
         if (session?.user) {
           // Fetch player info
-          const { data: player } = await supabase
+          const { data: player } = await sb
             .from('players')
             .select('username, display_name')
             .eq('id', session.user.id)
@@ -68,13 +68,15 @@ export default function RootLayout() {
     checkSession();
 
     // Listen for auth changes
-    const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, session) => {
-      if (event === 'SIGNED_IN' && session?.user) {
-        const { data: player } = await supabase
-          .from('players')
-          .select('username, display_name')
-          .eq('id', session.user.id)
-          .single();
+    let subscription: any = null;
+    getSupabaseClient().then((sb) => {
+      const { data: { subscription: sub } } = sb.auth.onAuthStateChange(async (event, session) => {
+        if (event === 'SIGNED_IN' && session?.user) {
+          const { data: player } = await sb
+            .from('players')
+            .select('username, display_name')
+            .eq('id', session.user.id)
+            .single();
 
         if (player) {
           setAuth(session.user.id, player.username, player.display_name);
@@ -82,14 +84,16 @@ export default function RootLayout() {
           const token = await getAccessToken();
           if (token) bootstrapAccounts(token).catch(() => {});
         }
-      } else if (event === 'SIGNED_OUT') {
-        gameSocket.disconnect();
-        clearAuth();
-      }
+        } else if (event === 'SIGNED_OUT') {
+          gameSocket.disconnect();
+          clearAuth();
+        }
+      });
+      subscription = sub;
     });
 
     return () => {
-      subscription.unsubscribe();
+      if (subscription) subscription.unsubscribe();
       gameSocket.disconnect();
     };
   }, []);

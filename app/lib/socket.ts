@@ -7,7 +7,11 @@ import { getAccessToken } from './supabase';
 
 type EventCallback = (data: any) => void;
 
-const SERVER_URL = process.env.EXPO_PUBLIC_SERVER_URL || 'http://localhost:3001';
+// In production (same-origin), use current host. In dev, use localhost.
+const SERVER_URL = process.env.EXPO_PUBLIC_SERVER_URL
+  || (typeof window !== 'undefined' && window.location?.hostname !== 'localhost'
+    ? window.location.origin
+    : 'http://localhost:3001');
 
 class GameSocket {
   private socket: Socket | null = null;

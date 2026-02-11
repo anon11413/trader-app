@@ -6,7 +6,7 @@ import { View, StyleSheet, KeyboardAvoidingView, Platform, ScrollView } from 're
 import { Text, TextInput, Button, HelperText } from 'react-native-paper';
 import { Link } from 'expo-router';
 import { colors, spacing, fontSize } from '../../theme';
-import { supabase, setRememberMe } from '../../lib/supabase';
+import { getSupabaseClient, setRememberMe } from '../../lib/supabase';
 
 export default function RegisterScreen() {
   const [email, setEmail] = useState('');
@@ -28,7 +28,8 @@ export default function RegisterScreen() {
     setUsernameStatus('checking');
     const timer = setTimeout(async () => {
       try {
-        const { data, error } = await supabase.rpc('check_username_available', {
+        const sb = await getSupabaseClient();
+        const { data, error } = await sb.rpc('check_username_available', {
           p_username: username.trim(),
         });
         if (error) {
@@ -76,7 +77,8 @@ export default function RegisterScreen() {
 
     try {
       // 1. Create auth user
-      const { data: authData, error: authError } = await supabase.auth.signUp({
+      const sb = await getSupabaseClient();
+      const { data: authData, error: authError } = await sb.auth.signUp({
         email: email.trim(),
         password,
       });
@@ -92,7 +94,7 @@ export default function RegisterScreen() {
       }
 
       // 2. Register player (creates player record + default account)
-      const { data: regResult, error: regError } = await supabase.rpc('register_player', {
+      const { data: regResult, error: regError } = await sb.rpc('register_player', {
         p_user_id: authData.user.id,
         p_username: username.trim(),
         p_display_name: username.trim(),

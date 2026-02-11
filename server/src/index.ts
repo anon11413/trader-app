@@ -96,6 +96,14 @@ app.get('/health', (_req, res) => {
   res.json({ status: 'ok', timestamp: new Date().toISOString() });
 });
 
+// Public config for frontend (Supabase URL + anon key — these are public/safe)
+app.get('/api/config', (_req, res) => {
+  res.json({
+    supabaseUrl: config.SUPABASE_URL,
+    supabaseAnonKey: config.SUPABASE_ANON_KEY,
+  });
+});
+
 // --- Instrument prices ---
 
 // GET /api/instruments/:currency — all 7 instrument prices + sparklines

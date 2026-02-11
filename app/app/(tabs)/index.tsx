@@ -10,7 +10,7 @@ import { colors, spacing, fontSize, currencyColor } from '../../theme';
 import { formatCurrency, formatPrice, formatChange, formatTimeAgo } from '../../lib/format';
 import { useStore, InstrumentPrice } from '../../lib/store';
 import { gameSocket } from '../../lib/socket';
-import { supabase, getAccessToken } from '../../lib/supabase';
+import { getSupabaseClient, getAccessToken } from '../../lib/supabase';
 import * as simApi from '../../lib/simApi';
 import { CURRENCIES } from '../../lib/instruments';
 
@@ -82,7 +82,8 @@ export default function DashboardScreen() {
   }).filter(Boolean) as InstrumentPrice[];
 
   async function handleLogout() {
-    await supabase.auth.signOut();
+    const sb = await getSupabaseClient();
+    await sb.auth.signOut();
     clearAuth();
   }
 

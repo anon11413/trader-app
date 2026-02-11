@@ -1,16 +1,16 @@
 /**
  * Supabase auth client — handles login, registration, session management.
+ * Uses runtime config from /api/config so no build-time env vars needed.
  * Cross-platform storage adapter for web (localStorage/sessionStorage).
  */
 import { createClient, SupabaseClient } from '@supabase/supabase-js';
 import { Platform } from 'react-native';
 
-// These will come from environment / app.config
-const SUPABASE_URL = process.env.EXPO_PUBLIC_SUPABASE_URL || '';
-const SUPABASE_ANON_KEY = process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY || '';
-
 const REMEMBER_ME_KEY = 'trader_remember_me';
-const AUTH_STORAGE_KEY = 'sb-auth-token';
+
+// Try build-time env vars first, fall back to runtime fetch
+let SUPABASE_URL = process.env.EXPO_PUBLIC_SUPABASE_URL || '';
+let SUPABASE_ANON_KEY = process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY || '';
 
 /**
  * Cross-platform storage adapter.
@@ -18,7 +18,6 @@ const AUTH_STORAGE_KEY = 'sb-auth-token';
  */
 function createStorageAdapter() {
   if (Platform.OS !== 'web') {
-    // Fallback for non-web (not used in this app, but safe)
     const mem = new Map<string, string>();
     return {
       getItem: (key: string) => mem.get(key) ?? null,
@@ -51,18 +50,65 @@ function createStorageAdapter() {
   };
 }
 
-export const supabase: SupabaseClient = createClient(
-  SUPABASE_URL,
-  SUPABASE_ANON_KEY,
-  {
+function buildClient(url: string, key: string): SupabaseClient {
+  return createClient(url, key, {
     auth: {
       storage: createStorageAdapter(),
       autoRefreshToken: true,
       persistSession: true,
       detectSessionInUrl: true,
     },
+  });
+}
+
+// Lazy-initialized client — resolves after runtime config is fetched
+let _client: SupabaseClient | null = null;
+let _clientPromise: Promise<SupabaseClient> | null = null;
+
+/**
+ * Get the Supabase client. Lazily initializes on first call.
+ * If build-time env vars are present, uses them immediately.
+ * Otherwise, fetches /api/config from the server.
+ */
+export function getSupabaseClient(): Promise<SupabaseClient> {
+  if (_client) return Promise.resolve(_client);
+  if (_clientPromise) return _clientPromise;
+
+  // If env vars were baked in at build time, use them directly
+  if (SUPABASE_URL && SUPABASE_ANON_KEY) {
+    _client = buildClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+    return Promise.resolve(_client);
   }
-);
+
+  // Otherwise fetch from server at runtime
+  _clientPromise = fetch('/api/config')
+    .then((res) => res.json())
+    .then((cfg: { supabaseUrl: string; supabaseAnonKey: string }) => {
+      SUPABASE_URL = cfg.supabaseUrl;
+      SUPABASE_ANON_KEY = cfg.supabaseAnonKey;
+      _client = buildClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+      return _client;
+    });
+
+  return _clientPromise;
+}
+
+/**
+ * Synchronous accessor — returns null if not yet initialized.
+ * Use getSupabaseClient() for the async version.
+ */
+export function getSupabaseSync(): SupabaseClient | null {
+  return _client;
+}
+
+// Also export a `supabase` property for backwards compat — will be null until init
+// Most code should use getSupabaseClient() instead
+export let supabase: SupabaseClient = null as any;
+
+// Auto-initialize on import
+getSupabaseClient().then((c) => {
+  supabase = c;
+});
 
 /**
  * Set remember-me preference.
@@ -84,14 +130,14 @@ export function getRememberMe(): boolean {
  * Ensure we have a valid session, refresh if needed.
  */
 export async function ensureSession() {
-  const { data: { session } } = await supabase.auth.getSession();
+  const client = await getSupabaseClient();
+  const { data: { session } } = await client.auth.getSession();
   if (!session) return null;
 
-  // Check if token expires within 5 minutes
   const expiresAt = session.expires_at ?? 0;
   const now = Math.floor(Date.now() / 1000);
   if (expiresAt - now < 300) {
-    const { data: { session: refreshed } } = await supabase.auth.refreshSession();
+    const { data: { session: refreshed } } = await client.auth.refreshSession();
     return refreshed;
   }
 

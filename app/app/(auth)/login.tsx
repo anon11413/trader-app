@@ -6,7 +6,7 @@ import { View, StyleSheet, KeyboardAvoidingView, Platform, ScrollView } from 're
 import { Text, TextInput, Button, Checkbox, HelperText } from 'react-native-paper';
 import { Link } from 'expo-router';
 import { colors, spacing, fontSize } from '../../theme';
-import { supabase, setRememberMe, getRememberMe } from '../../lib/supabase';
+import { getSupabaseClient, setRememberMe, getRememberMe } from '../../lib/supabase';
 
 export default function LoginScreen() {
   const [email, setEmail] = useState('');
@@ -27,7 +27,8 @@ export default function LoginScreen() {
 
     try {
       setRememberMe(rememberMe);
-      const { error: authError } = await supabase.auth.signInWithPassword({
+      const sb = await getSupabaseClient();
+      const { error: authError } = await sb.auth.signInWithPassword({
         email: email.trim(),
         password,
       });

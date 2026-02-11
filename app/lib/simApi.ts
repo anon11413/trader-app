@@ -3,7 +3,11 @@
  * These proxy through our trader server to avoid CORS issues.
  */
 
-const SERVER_URL = process.env.EXPO_PUBLIC_SERVER_URL || 'http://localhost:3001';
+// In production (same-origin), use '' for relative URLs. In dev, use localhost.
+const SERVER_URL = process.env.EXPO_PUBLIC_SERVER_URL
+  || (typeof window !== 'undefined' && window.location?.hostname !== 'localhost'
+    ? ''
+    : 'http://localhost:3001');
 
 async function apiFetch<T>(path: string): Promise<T> {
   const res = await fetch(`${SERVER_URL}${path}`);
