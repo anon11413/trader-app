@@ -21,6 +21,7 @@ class GameSocket {
   private authRetries = 0;
   private maxRetries = 3;
   private _isAuthenticated = false;
+  private pendingMessages: Array<{ event: string; data?: any }> = [];
 
   /**
    * Connect to server for public price feed (no auth required).
@@ -42,6 +43,15 @@ class GameSocket {
       this.socket.on('connect', () => {
         console.log('[Socket] Connected (public)');
         this.authRetries = 0;
+        // Flush any messages that were queued while disconnected
+        if (this.pendingMessages.length > 0) {
+          console.log(`[Socket] Flushing ${this.pendingMessages.length} queued message(s)`);
+          const queued = [...this.pendingMessages];
+          this.pendingMessages = [];
+          for (const msg of queued) {
+            this.socket!.emit(msg.event, msg.data);
+          }
+        }
         this.emit('connected', {});
       });
 
@@ -161,13 +171,18 @@ class GameSocket {
   }
 
   /**
-   * Send event to server.
+   * Send event to server. Queues message if not connected and triggers reconnect.
    */
   send(event: string, data?: any) {
     if (this.socket?.connected) {
       this.socket.emit(event, data);
     } else {
-      console.warn(`[Socket] Cannot send ${event}: not connected`);
+      console.warn(`[Socket] Not connected, queuing ${event} and reconnecting...`);
+      this.pendingMessages.push({ event, data });
+      // Trigger a reconnect so the queued message gets sent
+      if (!this.connecting) {
+        this.connect();
+      }
     }
   }
 

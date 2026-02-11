@@ -35,6 +35,7 @@ export default function InstrumentDetailScreen() {
   const [chartMode, setChartMode] = useState<'line' | 'candle'>('line');
   const [loading, setLoading] = useState(true);
   const refreshIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const chartRefreshDebounce = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const def = getInstrument(id || '');
   const displayName = getInstrumentDisplayName(id || '', currency || 'EUR');
@@ -115,24 +116,30 @@ export default function InstrumentDetailScreen() {
     fetchChart(true);
   }, [fetchChart]);
 
-  // Auto-refresh chart every 30 seconds
+  // Auto-refresh chart every 5 seconds as a fallback
   useEffect(() => {
     refreshIntervalRef.current = setInterval(() => {
       fetchChart(false); // silent refresh, no loading spinner
-    }, 30000);
+    }, 5000);
     return () => {
       if (refreshIntervalRef.current) clearInterval(refreshIntervalRef.current);
     };
   }, [fetchChart]);
 
-  // Listen for socket price updates to trigger a chart refresh
+  // Listen for socket price updates to trigger a debounced chart refresh
   useEffect(() => {
     const unsub = gameSocket.on('price_update', () => {
-      // Prices in store are updated by other listeners;
-      // we just need the chart to refresh periodically (handled by interval above)
+      // Debounce: refresh chart 500ms after last price_update to batch rapid updates
+      if (chartRefreshDebounce.current) clearTimeout(chartRefreshDebounce.current);
+      chartRefreshDebounce.current = setTimeout(() => {
+        fetchChart(false);
+      }, 500);
     });
-    return unsub;
-  }, []);
+    return () => {
+      unsub();
+      if (chartRefreshDebounce.current) clearTimeout(chartRefreshDebounce.current);
+    };
+  }, [fetchChart]);
 
   const isPositive = (currentInstrument?.changePercent ?? 0) >= 0;
 
