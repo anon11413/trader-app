@@ -19,6 +19,7 @@ export default function MarketsScreen() {
   const [refreshing, setRefreshing] = useState(false);
   const [viewMode, setViewMode] = useState<'all' | Currency>('all');
   const [displayCurrency, setDisplayCurrency] = useState<string | null>(null); // null = native prices
+  const [inflationAdjusted, setInflationAdjusted] = useState(false);
 
   // Fetch prices for all currencies (core + commodities + forex)
   const fetchPrices = useCallback(async () => {
@@ -82,6 +83,14 @@ export default function MarketsScreen() {
     return Array.from(ids).sort();
   }, [commodityPrices, currenciesToShow]);
 
+  // Get the labour hour price for the display currency (used for inflation adjustment)
+  const labourPrice = useMemo(() => {
+    if (!displayCurrency || !inflationAdjusted) return undefined;
+    const commodities = commodityPrices[displayCurrency] || [];
+    const labourInst = commodities.find(c => c.id === 'GOOD_LABOURHOUR');
+    return labourInst?.price || undefined;
+  }, [displayCurrency, inflationAdjusted, commodityPrices]);
+
   return (
     <View style={styles.container}>
       {/* Header */}
@@ -117,7 +126,7 @@ export default function MarketsScreen() {
         <Text style={styles.priceInLabel}>Price in:</Text>
         <Pressable
           style={[styles.priceInChip, !displayCurrency && styles.priceInChipActive]}
-          onPress={() => setDisplayCurrency(null)}
+          onPress={() => { setDisplayCurrency(null); setInflationAdjusted(false); }}
         >
           <Text style={[styles.priceInChipText, !displayCurrency && styles.priceInChipTextActive]}>
             Native
@@ -135,6 +144,30 @@ export default function MarketsScreen() {
           </Pressable>
         ))}
       </View>
+
+      {/* Inflation adjusted toggle — only when "Price in" a single currency */}
+      {displayCurrency && (
+        <View style={styles.priceInRow}>
+          <Pressable
+            style={[styles.inflationChip, inflationAdjusted && styles.inflationChipActive]}
+            onPress={() => setInflationAdjusted(!inflationAdjusted)}
+          >
+            <Text style={[styles.inflationChipText, inflationAdjusted && styles.inflationChipTextActive]}>
+              {inflationAdjusted ? '📊 Inflation Adjusted' : '📊 Inflation Adjust'}
+            </Text>
+          </Pressable>
+          {inflationAdjusted && labourPrice && (
+            <Text style={styles.labourPriceHint}>
+              ÷ Labour: {labourPrice.toFixed(2)} {displayCurrency}
+            </Text>
+          )}
+          {inflationAdjusted && !labourPrice && (
+            <Text style={[styles.labourPriceHint, { color: colors.error }]}>
+              Labour price not available
+            </Text>
+          )}
+        </View>
+      )}
 
       {/* Instrument list — grouped by section, currencies within each */}
       <ScrollView
@@ -176,6 +209,7 @@ export default function MarketsScreen() {
                   instrument={inst}
                   displayCurrency={displayCurrency || undefined}
                   forexRates={displayCurrency ? forexPrices : undefined}
+                  labourPrice={labourPrice}
                 />
               ))}
             </View>
@@ -198,6 +232,7 @@ export default function MarketsScreen() {
                   instrument={inst}
                   displayCurrency={displayCurrency || undefined}
                   forexRates={displayCurrency ? forexPrices : undefined}
+                  labourPrice={labourPrice}
                 />
               ));
             })}
@@ -276,6 +311,31 @@ const styles = StyleSheet.create({
   },
   priceInChipTextActive: {
     color: '#fff',
+  },
+  inflationChip: {
+    paddingHorizontal: spacing.md,
+    paddingVertical: 5,
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: '#ff9800',
+    backgroundColor: colors.surface,
+  },
+  inflationChipActive: {
+    borderColor: '#ff9800',
+    backgroundColor: '#ff980030',
+  },
+  inflationChipText: {
+    fontSize: fontSize.xs,
+    fontWeight: '600',
+    color: '#ff9800',
+  },
+  inflationChipTextActive: {
+    color: '#ffb74d',
+  },
+  labourPriceHint: {
+    fontSize: fontSize.xs,
+    color: colors.textDim,
+    marginLeft: spacing.xs,
   },
   list: {
     flex: 1,

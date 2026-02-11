@@ -18,6 +18,8 @@ interface InstrumentCardProps {
   displayCurrency?: string;
   /** Forex rates keyed by base currency, needed when displayCurrency is set */
   forexRates?: Record<string, InstrumentPrice[]>;
+  /** If set, divide price by this value for inflation adjustment (labour hour price) */
+  labourPrice?: number;
 }
 
 /** Convert a price from one currency to another using forex rates in the store */
@@ -34,7 +36,7 @@ function convertPrice(
   return price * rateInst.price;
 }
 
-export default function InstrumentCard({ instrument, displayCurrency, forexRates }: InstrumentCardProps) {
+export default function InstrumentCard({ instrument, displayCurrency, forexRates, labourPrice }: InstrumentCardProps) {
   const router = useRouter();
   const isPositive = instrument.changePercent >= 0;
   const changeColor = isPositive ? colors.success : colors.error;
@@ -43,9 +45,15 @@ export default function InstrumentCard({ instrument, displayCurrency, forexRates
 
   // Determine the price and currency to display
   const showCurrency = displayCurrency || instrument.currency;
-  const showPrice = (displayCurrency && forexRates)
+  let showPrice = (displayCurrency && forexRates)
     ? convertPrice(instrument.price, instrument.currency, displayCurrency, forexRates)
     : instrument.price;
+
+  // Inflation adjustment: divide by labour price to get "real" price
+  const isInflationAdjusted = labourPrice && labourPrice > 0;
+  if (isInflationAdjusted) {
+    showPrice = showPrice / labourPrice;
+  }
 
   return (
     <Pressable
@@ -83,8 +91,8 @@ export default function InstrumentCard({ instrument, displayCurrency, forexRates
 
       {/* Right: price + change */}
       <View style={styles.priceSection}>
-        <Text style={styles.price}>
-          {formatPrice(showPrice, showCurrency)}
+        <Text style={[styles.price, isInflationAdjusted && styles.priceAdjusted]}>
+          {isInflationAdjusted ? showPrice.toFixed(2) + ' LH' : formatPrice(showPrice, showCurrency)}
         </Text>
         <View style={[styles.changeBadge, { backgroundColor: isPositive ? '#1b5e2015' : '#b7171715' }]}>
           <Text style={[styles.changeText, { color: changeColor }]}>
@@ -147,6 +155,9 @@ const styles = StyleSheet.create({
     fontSize: fontSize.md,
     fontWeight: '700',
     color: colors.text,
+  },
+  priceAdjusted: {
+    color: '#ffb74d',
   },
   changeBadge: {
     paddingHorizontal: spacing.sm,
