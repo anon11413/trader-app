@@ -1,0 +1,27 @@
+{
+  "expo": {
+    "name": "Trader App",
+    "slug": "trader-app",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "userInterfaceStyle": "dark",
+    "newArchEnabled": true,
+    "scheme": "traderapp",
+    "splash": {
+      "backgroundColor": "#0f0f1a",
+      "resizeMode": "contain"
+    },
+    "web": {
+      "favicon": "./assets/favicon.png",
+      "bundler": "metro"
+    },
+    "plugins": [
+      "expo-router"
+    ],
+    "extra": {
+      "eas": {
+        "projectId": "trader-app"
+      }
+    }
+  }
+}

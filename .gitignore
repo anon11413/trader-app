@@ -1,0 +1,11 @@
+node_modules/
+dist/
+.expo/
+app/dist/
+server/public/*.js
+server/public/*.css
+server/public/*.html
+server/public/assets/
+*.env
+*.env.local
+.DS_Store
