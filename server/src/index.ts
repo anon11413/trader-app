@@ -342,8 +342,12 @@ httpServer.listen(config.PORT, () => {
   // Start cron jobs
   startCronJobs();
 
-  // Connect to simulation SSE
-  connectToSimSSE();
+  // Connect to simulation SSE (wrapped in try-catch to prevent server crash)
+  try {
+    connectToSimSSE();
+  } catch (e) {
+    console.error('[Server] Failed to start SSE connection:', e);
+  }
 });
 
 export { app, httpServer, io };
