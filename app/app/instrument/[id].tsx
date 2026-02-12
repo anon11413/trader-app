@@ -116,11 +116,11 @@ export default function InstrumentDetailScreen() {
     fetchChart(true);
   }, [fetchChart]);
 
-  // Auto-refresh chart every 5 seconds as a fallback
+  // Auto-refresh chart every 2 seconds as a fallback
   useEffect(() => {
     refreshIntervalRef.current = setInterval(() => {
       fetchChart(false); // silent refresh, no loading spinner
-    }, 5000);
+    }, 2000);
     return () => {
       if (refreshIntervalRef.current) clearInterval(refreshIntervalRef.current);
     };

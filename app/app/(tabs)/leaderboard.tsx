@@ -33,9 +33,9 @@ export default function LeaderboardScreen() {
     fetchLeaderboard(type);
   }, [type, fetchLeaderboard]);
 
-  // Auto-refresh every 30s
+  // Auto-refresh every 2s
   useEffect(() => {
-    const interval = setInterval(() => fetchLeaderboard(type), 30000);
+    const interval = setInterval(() => fetchLeaderboard(type), 2000);
     return () => clearInterval(interval);
   }, [type, fetchLeaderboard]);
 

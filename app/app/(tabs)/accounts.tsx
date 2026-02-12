@@ -51,6 +51,12 @@ export default function AccountsScreen() {
     return () => unsubs.forEach(u => u());
   }, [fetchPortfolio]);
 
+  // Auto-refresh every 2 seconds
+  useEffect(() => {
+    const interval = setInterval(fetchPortfolio, 2000);
+    return () => clearInterval(interval);
+  }, [fetchPortfolio]);
+
   const onRefresh = useCallback(async () => {
     setRefreshing(true);
     await fetchPortfolio();

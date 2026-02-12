@@ -4,8 +4,8 @@
  * Banks, National, Transactions, Agents.
  * Each category is expandable, showing data charts.
  */
-import React, { useState, useEffect, useCallback } from 'react';
-import { View, StyleSheet, ScrollView, Pressable, RefreshControl } from 'react-native';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
+import { View, StyleSheet, ScrollView, Pressable, RefreshControl, Platform } from 'react-native';
 import { Text, SegmentedButtons } from 'react-native-paper';
 import MiniChart from '../../components/MiniChart';
 import { colors, spacing, fontSize, currencyColor } from '../../theme';
@@ -147,6 +147,36 @@ export default function DataScreen() {
       if (cat) fetchCategory(cat, currency);
     }
   }, [currency]);
+
+  // Auto-refresh every 2 seconds when a category is expanded
+  useEffect(() => {
+    if (!expanded) return;
+    const interval = setInterval(() => {
+      const cat = DATA_CATEGORIES.find(c => c.key === expanded);
+      if (cat) fetchCategory(cat, currency);
+    }, 2000);
+    return () => clearInterval(interval);
+  }, [expanded, currency, fetchCategory]);
+
+  // Arrow key currency switching (web only)
+  useEffect(() => {
+    if (Platform.OS !== 'web') return;
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'ArrowLeft' || e.key === 'ArrowRight') {
+        e.preventDefault();
+        setCurrency(prev => {
+          const idx = CURRENCIES.indexOf(prev);
+          if (e.key === 'ArrowRight') {
+            return CURRENCIES[(idx + 1) % CURRENCIES.length];
+          } else {
+            return CURRENCIES[(idx - 1 + CURRENCIES.length) % CURRENCIES.length];
+          }
+        });
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, []);
 
   const onRefresh = useCallback(async () => {
     setRefreshing(true);

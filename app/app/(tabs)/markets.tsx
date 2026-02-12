@@ -60,7 +60,7 @@ export default function MarketsScreen() {
 
   // Auto-refresh polling fallback
   useEffect(() => {
-    const interval = setInterval(fetchPrices, 5000);
+    const interval = setInterval(fetchPrices, 2000);
     return () => clearInterval(interval);
   }, [fetchPrices]);
 

@@ -74,7 +74,7 @@ export default function DashboardScreen() {
               const data = await simApi.getPortfolio(token);
               setPortfolio(data);
             }
-          }, 5000);
+          }, 2000);
         }
       }),
       gameSocket.on('trade_feed', (item: any) => addTradeFeedItem(item)),
@@ -90,7 +90,7 @@ export default function DashboardScreen() {
 
   // Auto-refresh polling fallback
   useEffect(() => {
-    const interval = setInterval(fetchAll, 5000);
+    const interval = setInterval(fetchAll, 2000);
     return () => clearInterval(interval);
   }, [fetchAll]);
 

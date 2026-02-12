@@ -48,7 +48,7 @@ export default function ForexScreen() {
 
   // Auto-refresh polling fallback
   useEffect(() => {
-    const interval = setInterval(fetchForex, 15000);
+    const interval = setInterval(fetchForex, 2000);
     return () => clearInterval(interval);
   }, [fetchForex]);
 
