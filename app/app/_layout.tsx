@@ -85,7 +85,10 @@ export default function RootLayout() {
         const { data: { session } } = await sb.auth.getSession();
         if (session?.user) {
           const found = await fetchPlayerAndSetAuth(sb, session.user.id);
-          if (!found) clearAuth();
+          if (!found) {
+            // Player lookup failed but session exists — set basic auth so user isn't stuck
+            setAuth(session.user.id, session.user.email || 'Player', null);
+          }
         } else {
           clearAuth();
         }
@@ -96,7 +99,13 @@ export default function RootLayout() {
         setInitializing(false);
       }
     }
-    checkSession();
+
+    // Hard timeout: if checkSession takes > 10s, stop loading screen anyway
+    const sessionTimeout = setTimeout(() => {
+      console.warn('[Auth] Session check timed out — showing app without auth');
+      setInitializing(false);
+    }, 10000);
+    checkSession().finally(() => clearTimeout(sessionTimeout));
 
     // Listen for auth changes
     let subscription: any = null;

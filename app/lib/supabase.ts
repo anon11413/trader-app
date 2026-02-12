@@ -80,15 +80,24 @@ export function getSupabaseClient(): Promise<SupabaseClient> {
     return Promise.resolve(_client);
   }
 
-  // Otherwise fetch from server at runtime
-  _clientPromise = fetch('/api/config')
-    .then((res) => res.json())
-    .then((cfg: { supabaseUrl: string; supabaseAnonKey: string }) => {
-      SUPABASE_URL = cfg.supabaseUrl;
-      SUPABASE_ANON_KEY = cfg.supabaseAnonKey;
-      _client = buildClient(SUPABASE_URL, SUPABASE_ANON_KEY);
-      return _client;
-    });
+  // Otherwise fetch from server at runtime (with timeout)
+  _clientPromise = Promise.race([
+    fetch('/api/config')
+      .then((res) => res.json())
+      .then((cfg: { supabaseUrl: string; supabaseAnonKey: string }) => {
+        SUPABASE_URL = cfg.supabaseUrl;
+        SUPABASE_ANON_KEY = cfg.supabaseAnonKey;
+        _client = buildClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+        return _client;
+      }),
+    new Promise<never>((_, reject) =>
+      setTimeout(() => reject(new Error('Supabase config fetch timed out after 8s')), 8000)
+    ),
+  ]).catch((err) => {
+    console.error('[Supabase] Failed to initialize:', err);
+    _clientPromise = null; // allow retry on next call
+    throw err;
+  });
 
   return _clientPromise;
 }
