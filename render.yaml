@@ -1,0 +1,21 @@
+services:
+  - type: web
+    name: trader-app-replay
+    runtime: node
+    region: oregon
+    branch: feature/replay-mode
+    buildCommand: cd server && npm install && npm run build
+    startCommand: cd server && npm start
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: REPLAY_MODE
+        value: "true"
+      - key: REPLAY_SPEED_MS
+        value: "60000"
+      - key: SUPABASE_URL
+        sync: false
+      - key: SUPABASE_ANON_KEY
+        sync: false
+      - key: SUPABASE_SERVICE_KEY
+        sync: false
