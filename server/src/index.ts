@@ -16,8 +16,9 @@ import {
   getAllCommodityPrices, getForexPrices,
   CURRENCIES, Currency
 } from './sim/instruments';
-import { getOhlcv, getBalanceSheet, getTimeSeries, getOhlcvAssets, getCurrencies, getSimStatus } from './sim/api';
+import { getOhlcv, getBalanceSheet, getTimeSeries, getOhlcvAssets, getCurrencies, getSimStatus, getConfigChanges } from './sim/api';
 import { connectToSimSSE, setSimUpdateHandler } from './sim/sse';
+import { initReplay, getReplayProgress, pauseReplay, resumeReplay, setReplaySpeed, seekToDate, seekToIndex } from './sim/replay';
 import { setupSocketHandlers } from './socket/handlers';
 import { startCronJobs, snapshotPrices, refreshLeaderboards } from './cron/jobs';
 import { getPortfolioWithPrices } from './game/portfolio';
@@ -60,33 +61,35 @@ const io = new SocketIOServer(httpServer, {
 
 setupSocketHandlers(io);
 
-// ── SSE simulation listener ──────────────────────────────────────
+// ── SSE simulation listener (live mode only) ────────────────────
 
-setSimUpdateHandler(async (simDate: string) => {
-  console.log(`[Server] Sim update: ${simDate}`);
-  try {
-    // Broadcast fresh prices to ALL connected clients (public — no auth required)
-    for (const currency of CURRENCIES) {
-      const [corePrices, commodityPrices, forexPrices] = await Promise.all([
-        getAllPrices(currency),
-        getAllCommodityPrices(currency),
-        getForexPrices(currency),
-      ]);
-      io.emit('price_update', {
-        currency,
-        instruments: corePrices,
-        commodities: commodityPrices,
-        forex: forexPrices,
-        simDate,
-      });
+if (!config.REPLAY_MODE) {
+  setSimUpdateHandler(async (simDate: string) => {
+    console.log(`[Server] Sim update: ${simDate}`);
+    try {
+      // Broadcast fresh prices to ALL connected clients (public — no auth required)
+      for (const currency of CURRENCIES) {
+        const [corePrices, commodityPrices, forexPrices] = await Promise.all([
+          getAllPrices(currency),
+          getAllCommodityPrices(currency),
+          getForexPrices(currency),
+        ]);
+        io.emit('price_update', {
+          currency,
+          instruments: corePrices,
+          commodities: commodityPrices,
+          forex: forexPrices,
+          simDate,
+        });
+      }
+      // Trigger price snapshot + leaderboard refresh
+      await snapshotPrices();
+      await refreshLeaderboards();
+    } catch (e) {
+      console.error('[Server] Failed to broadcast sim update:', e);
     }
-    // Trigger price snapshot + leaderboard refresh
-    await snapshotPrices();
-    await refreshLeaderboards();
-  } catch (e) {
-    console.error('[Server] Failed to broadcast sim update:', e);
-  }
-});
+  });
+}
 
 // ── Auth middleware helper ────────────────────────────────────────
 
@@ -375,6 +378,61 @@ app.get('/api/sim/timeseries/:currency/:category', async (req, res) => {
   }
 });
 
+// GET /api/sim/config-changes — autopilot policy decisions ("fed votes")
+app.get('/api/sim/config-changes', async (req, res) => {
+  try {
+    const data = await getConfigChanges(
+      req.query.currency as string | undefined,
+      req.query.from as string | undefined,
+      req.query.to as string | undefined
+    );
+    res.json(data);
+  } catch (e: any) {
+    res.status(500).json({ error: 'Failed to fetch config changes' });
+  }
+});
+
+// ── Replay admin routes (only registered in replay mode) ─────────
+
+if (config.REPLAY_MODE) {
+  app.get('/api/replay/status', (_req, res) => {
+    res.json(getReplayProgress());
+  });
+
+  app.post('/api/replay/pause', (_req, res) => {
+    pauseReplay();
+    res.json(getReplayProgress());
+  });
+
+  app.post('/api/replay/resume', (_req, res) => {
+    resumeReplay();
+    res.json(getReplayProgress());
+  });
+
+  app.post('/api/replay/speed', (req, res) => {
+    const { msPerDay } = req.body;
+    if (typeof msPerDay !== 'number' || msPerDay < 100) {
+      res.status(400).json({ error: 'msPerDay must be a number >= 100' });
+      return;
+    }
+    setReplaySpeed(msPerDay);
+    res.json(getReplayProgress());
+  });
+
+  app.post('/api/replay/seek', (req, res) => {
+    const { date, index } = req.body;
+    if (date) {
+      seekToDate(date);
+    } else if (typeof index === 'number') {
+      seekToIndex(index);
+    } else {
+      res.status(400).json({ error: 'Provide date (string) or index (number)' });
+      return;
+    }
+    res.json(getReplayProgress());
+  });
+}
+
 // ── SPA fallback ─────────────────────────────────────────────────
 // Any non-API route serves the Expo web index.html (SPA routing)
 // Express 5 requires named wildcard parameters
@@ -385,19 +443,53 @@ app.get('{*path}', (_req, res) => {
 // ── Start server ─────────────────────────────────────────────────
 
 httpServer.listen(config.PORT, () => {
-  console.log(`\n🚀 Trader App server running on port ${config.PORT}`);
+  console.log(`\n  Trader App server running on port ${config.PORT}`);
   console.log(`   Environment: ${config.NODE_ENV}`);
-  console.log(`   Sim API: ${config.SIM_API_URL}`);
-  console.log(`   Supabase: ${config.SUPABASE_URL ? '✓ connected' : '✗ not configured'}\n`);
+  console.log(`   Mode: ${config.REPLAY_MODE ? 'REPLAY' : 'LIVE'}`);
+  if (!config.REPLAY_MODE) {
+    console.log(`   Sim API: ${config.SIM_API_URL}`);
+  }
+  console.log(`   Supabase: ${config.SUPABASE_URL ? 'connected' : 'not configured'}\n`);
 
-  // Start cron jobs
-  startCronJobs();
+  if (config.REPLAY_MODE) {
+    // Replay mode: load dates from Supabase, start broadcast loop
+    initReplay(async (simDate: string) => {
+      console.log(`[Replay] Day: ${simDate}`);
+      try {
+        for (const currency of CURRENCIES) {
+          const [corePrices, commodityPrices, forexPrices] = await Promise.all([
+            getAllPrices(currency),
+            getAllCommodityPrices(currency),
+            getForexPrices(currency),
+          ]);
+          io.emit('price_update', {
+            currency,
+            instruments: corePrices,
+            commodities: commodityPrices,
+            forex: forexPrices,
+            simDate,
+          });
+        }
+        await snapshotPrices();
+        await refreshLeaderboards();
+      } catch (e) {
+        console.error('[Replay] Failed to broadcast:', e);
+      }
+    }).catch(e => {
+      console.error('[Replay] Failed to initialize:', e);
+    });
 
-  // Connect to simulation SSE (wrapped in try-catch to prevent server crash)
-  try {
-    connectToSimSSE();
-  } catch (e) {
-    console.error('[Server] Failed to start SSE connection:', e);
+    // Start cron jobs but skip price snapshot (replay handles it per day-advance)
+    startCronJobs({ skipPriceSnapshot: true });
+  } else {
+    // Live mode — existing behavior
+    startCronJobs();
+
+    try {
+      connectToSimSSE();
+    } catch (e) {
+      console.error('[Server] Failed to start SSE connection:', e);
+    }
   }
 });
 

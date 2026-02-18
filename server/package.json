@@ -5,8 +5,10 @@
   "main": "dist/index.js",
   "scripts": {
     "dev": "nodemon --watch src --ext ts --exec ts-node src/index.ts",
+    "dev:replay": "REPLAY_MODE=true REPLAY_SPEED_MS=5000 nodemon --watch src --ext ts --exec ts-node src/index.ts",
     "build": "tsc",
-    "start": "node dist/index.js"
+    "start": "node dist/index.js",
+    "export-sim": "bash scripts/export-sim-to-supabase.sh"
   },
   "type": "commonjs",
   "engines": {

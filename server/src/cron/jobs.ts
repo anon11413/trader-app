@@ -72,10 +72,13 @@ async function cleanupOldSnapshots(): Promise<void> {
 
 /**
  * Start all cron jobs.
+ * In replay mode, skip the price snapshot cron (replay engine handles it per day-advance).
  */
-export function startCronJobs() {
-  // Every 60 seconds: snapshot prices
-  cron.schedule('*/60 * * * * *', snapshotPrices);
+export function startCronJobs(opts?: { skipPriceSnapshot?: boolean }) {
+  if (!opts?.skipPriceSnapshot) {
+    // Every 60 seconds: snapshot prices
+    cron.schedule('*/60 * * * * *', snapshotPrices);
+  }
 
   // Every 30 seconds: refresh leaderboards
   cron.schedule('*/30 * * * * *', refreshLeaderboards);
@@ -83,7 +86,7 @@ export function startCronJobs() {
   // Daily at midnight: cleanup old snapshots
   cron.schedule('0 0 * * *', cleanupOldSnapshots);
 
-  console.log('[Cron] All cron jobs started');
+  console.log('[Cron] Cron jobs started' + (opts?.skipPriceSnapshot ? ' (price snapshot disabled — replay mode)' : ''));
 }
 
 // Export for manual triggering (e.g., on SSE sim update)
